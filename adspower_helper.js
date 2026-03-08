@@ -1,0 +1,126 @@
+const axios = require("axios");
+const config = require("./config");
+
+class AdsPowerHelper {
+  constructor() {
+    this.baseUrl = config.adsPower.baseUrl;
+  }
+
+  randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  randomUserAgent() {
+    const chromeVersions = ["120", "121", "122", "123", "124", "125"];
+    const version =
+      chromeVersions[Math.floor(Math.random() * chromeVersions.length)];
+    const minor = this.randomInt(0, 9999);
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.${minor}.0 Safari/537.36`;
+  }
+
+  async createProfile(profileName) {
+    try {
+      const response = await axios.post(
+        `${this.baseUrl}/api/v1/user/create`,
+        {
+          name: profileName,
+          group_id: config.adsPower.groupId,
+          domain_name: "",
+          os_type: "windows",
+          repeat_config: ["0"],
+          user_proxy_config: {
+            proxy_type: "socks5",
+            proxy_host: config.proxy.host,
+            proxy_port: config.proxy.port,
+            proxy_user: config.proxy.username,
+            proxy_password: config.proxy.password,
+            proxy_soft: "other",
+          },
+          fingerprint_config: {
+            automatic_timezone: "1",
+            language: ["en-US", "en"],
+            flash: "block",
+            fonts: ["all"],
+            webrtc: "disabled",
+            canvas: "0",
+            webgl: "0",
+            webgl_image: "0",
+            hardware_concurrency: "default",
+            ua: this.randomUserAgent(),
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${config.adsPower.apiKey}`,
+            "api-key": config.adsPower.apiKey, // Keeping both just in case
+          },
+        },
+      );
+
+      if (response.data.code !== 0) {
+        throw new Error(
+          `AdsPower Profile Creation Failed: ${response.data.msg}`,
+        );
+      }
+
+      return response.data.data.id;
+    } catch (error) {
+      if (error.response) {
+        console.error(
+          "AdsPower Error Response:",
+          JSON.stringify(error.response.data, null, 2),
+        );
+      }
+      console.error("Error creating AdsPower profile:", error.message);
+      throw error;
+    }
+  }
+
+  async startBrowser(profileId) {
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/api/v1/browser/start?user_id=${profileId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${config.adsPower.apiKey}`,
+            "api-key": config.adsPower.apiKey,
+          },
+        },
+      );
+
+      if (response.data.code !== 0) {
+        throw new Error(
+          `Failed to start AdsPower browser: ${response.data.msg}`,
+        );
+      }
+
+      // AdsPower returns ws endpoint in data.ws.puppeteer or data.ws.selenium
+      // For Playwright connectOverCDP, we use the debugger address if available or ws
+      return {
+        wsUrl: response.data.data.ws.puppeteer,
+        debugPort: response.data.data.debug_port,
+      };
+    } catch (error) {
+      console.error("Error starting browser:", error.message);
+      throw error;
+    }
+  }
+
+  async stopBrowser(profileId) {
+    try {
+      await axios.get(
+        `${this.baseUrl}/api/v1/browser/stop?user_id=${profileId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${config.adsPower.apiKey}`,
+            "api-key": config.adsPower.apiKey,
+          },
+        },
+      );
+    } catch (error) {
+      console.error("Error stopping browser:", error.message);
+    }
+  }
+}
+
+module.exports = new AdsPowerHelper();
