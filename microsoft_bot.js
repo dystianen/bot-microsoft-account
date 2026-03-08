@@ -6,15 +6,30 @@ class MicrosoftBot {
     this.wsUrl = wsUrl;
   }
 
+  async humanDelay(min = 500, max = 1500) {
+    const delay = Math.floor(Math.random() * (max - min + 1) + min);
+    await this.page.waitForTimeout(delay);
+  }
+
+  async randomMouseMove() {
+    const { width, height } = this.page.viewportSize() || {
+      width: 1280,
+      height: 720,
+    };
+    const x = Math.floor(Math.random() * width);
+    const y = Math.floor(Math.random() * height);
+    await this.page.mouse.move(x, y, { steps: 10 });
+  }
+
   async waitForPage(selector) {
     if (selector) {
       // Tunggu elemen spesifik muncul = page sudah siap
       await this.page.waitForSelector(selector, {
         state: "attached",
-        timeout: 100000,
+        timeout: 120000,
       });
     } else {
-      await this.page.waitForLoadState("domcontentloaded", { timeout: 100000 });
+      await this.page.waitForLoadState("domcontentloaded", { timeout: 150000 });
     }
   }
 
@@ -29,7 +44,7 @@ class MicrosoftBot {
 
     const pages = this.context.pages();
     this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
-    this.profileId = this.wsUrl.split('/').pop(); // Extract profile ID from WS URL if possible
+    this.profileId = this.wsUrl.split("/").pop(); // Extract profile ID from WS URL if possible
   }
 
   async openMicrosoftPage() {
@@ -78,7 +93,10 @@ class MicrosoftBot {
     await this.waitForPage('[data-bi-id="Email"]');
 
     const emailInput = this.page.locator('[data-bi-id="Email"]');
-    await emailInput.type(config.microsoftAccount.email, { delay: 80 });
+    await emailInput.pressSequentially(config.microsoftAccount.email, {
+      delay: Math.floor(Math.random() * 50) + 70,
+    });
+    await this.humanDelay(1000, 2000);
   }
 
   async clickCollectEmailNextButton() {
@@ -109,50 +127,77 @@ class MicrosoftBot {
 
     await this.waitForPage('[data-testid="firstNameField"]');
 
-    // Fill semua text fields
-    await this.page.evaluate((account) => {
-      const fill = (selector, value) => {
-        const el = document.querySelector(selector);
-        if (!el) return console.warn("Field not found:", selector);
-        el.value = value;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      };
+    // Fill semua text fields secara human-like
+    const fields = [
+      {
+        selector: '[data-testid="firstNameField"]',
+        value: config.microsoftAccount.firstName,
+      },
+      {
+        selector: '[data-testid="lastNameField"]',
+        value: config.microsoftAccount.lastName,
+      },
+      {
+        selector: '[data-testid="companyNameField"]',
+        value: config.microsoftAccount.companyName,
+      },
+      {
+        selector: '[data-testid="phoneNumberField"]',
+        value: config.microsoftAccount.phone,
+      },
+      {
+        selector: '[data-testid="jobTitle"]',
+        value: config.microsoftAccount.jobTitle,
+      },
+    ];
 
-      fill('[data-testid="firstNameField"]', account.firstName);
-      fill('[data-testid="lastNameField"]', account.lastName);
-      fill('[data-testid="companyNameField"]', account.companyName);
-      fill('[data-testid="phoneNumberField"]', account.phone);
-      fill('[data-testid="jobTitle"]', account.jobTitle);
-    }, config.microsoftAccount);
+    for (const field of fields) {
+      const locator = this.page.locator(field.selector);
+      await locator.click();
+      await locator.pressSequentially(field.value, {
+        delay: Math.floor(Math.random() * 40) + 60,
+      });
+      await this.humanDelay(400, 800);
+    }
 
+    await this.page.locator("#address_line1").click();
     await this.page
       .locator("#address_line1")
-      .fill(config.microsoftAccount.address);
-    await this.page.waitForTimeout(300);
+      .pressSequentially(config.microsoftAccount.address, {
+        delay: Math.floor(Math.random() * 30) + 50,
+      });
+    await this.humanDelay(500, 1000);
 
-    await this.page.locator("#city").fill(config.microsoftAccount.city);
-    await this.page.waitForTimeout(300);
+    await this.page.locator("#city").click();
+    await this.page
+      .locator("#city")
+      .pressSequentially(config.microsoftAccount.city, {
+        delay: Math.floor(Math.random() * 30) + 50,
+      });
+    await this.humanDelay(500, 1000);
 
+    await this.page.locator("#postal_code").click();
     await this.page
       .locator("#postal_code")
-      .fill(config.microsoftAccount.postalCode);
-    await this.page.waitForTimeout(300);
+      .pressSequentially(config.microsoftAccount.postalCode, {
+        delay: Math.floor(Math.random() * 30) + 50,
+      });
+    await this.humanDelay(800, 1500);
 
     // Pilih company size (random)
     await this.selectDropdownByText(
       '[data-testid="companySizeDropdown"]',
       config.microsoftAccount.companySize,
     );
-    await this.page.waitForTimeout(500);
+    await this.humanDelay(600, 1200);
 
     // Pilih state Alabama (sesuai config)
     await this.selectDropdownByText("#input_region", "Alabama");
-    await this.page.waitForTimeout(500);
+    await this.humanDelay(600, 1200);
 
     // Pilih No untuk website
     await this.selectDropdownByText('[data-testid="websiteDropdown"]', "No");
-    await this.page.waitForTimeout(500);
+    await this.humanDelay(600, 1200);
 
     // Check partner checkbox
     await this.page.evaluate(() => {
@@ -160,7 +205,7 @@ class MicrosoftBot {
       if (checkbox && !checkbox.checked) checkbox.click();
     });
 
-    await this.page.waitForTimeout(500);
+    await this.humanDelay(1000, 2000);
 
     // Click Next
     await this.page.evaluate(() => {
@@ -208,14 +253,16 @@ class MicrosoftBot {
       timeout: 10000,
     });
 
-    // Pilih option by text
+    // Pilih option by text (partial match supported for month/year formats)
     await this.page.evaluate((text) => {
       const options = document.querySelectorAll(
         ".ms-Dropdown-items .ms-Dropdown-item",
       );
-      const target = Array.from(options).find(
-        (o) => o.textContent.trim().toLowerCase() === text.toLowerCase(),
-      );
+      const target = Array.from(options).find((o) => {
+        const itemText = o.textContent.trim().toLowerCase();
+        const search = text.toString().toLowerCase();
+        return itemText === search || itemText.startsWith(search);
+      });
       if (target) target.click();
     }, text);
   }
@@ -229,22 +276,41 @@ class MicrosoftBot {
   }
 
   async clickUseThisAddressButton() {
-    console.log("[STEP 10] Checking for Use this address button...");
+    console.log("[STEP 10] Checking for address confirmation button...");
 
     try {
-      await this.page.waitForSelector("#pidlddc-button-addressUseButton", {
-        state: "attached",
-        timeout: 30000,
-      });
+      const selector =
+        "#pidlddc-button-addressUseButton, #pidlddc-button-userEnteredButton";
 
-      await this.page.evaluate(() => {
-        document.querySelector("#pidlddc-button-addressUseButton").click();
-      });
+      const btn = this.page.locator(selector);
+      await btn.waitFor({ state: "visible", timeout: 15000 });
 
-      console.log("[STEP 10] Clicked Use this address button");
+      await this.randomMouseMove();
+      await btn.click();
+
+      console.log("[STEP 10] Address confirmation button clicked");
+      await this.humanDelay(1000, 2000);
     } catch {
-      console.log("[STEP 10] Use this address button not found, skipping...");
+      console.log(
+        "[STEP 10] Address confirmation button not found, skipping...",
+      );
     }
+  }
+
+  async waitForDomainSuggestion() {
+    console.log("[INFO] Waiting for domain suggestion to appear...");
+
+    await this.page.waitForFunction(
+      () => {
+        const el = document.querySelector(
+          'input.ms-TextField-field[maxlength="27"]',
+        );
+        return el && el.value && el.value.length > 5;
+      },
+      { timeout: 60000 },
+    );
+
+    console.log("[INFO] Domain suggestion detected");
   }
 
   async fillPassword() {
@@ -252,41 +318,157 @@ class MicrosoftBot {
 
     await this.waitForPage('[data-testid="pwdField"]');
 
-    // Tunggu field domain terisi dulu sebelum lanjut (ID nya gonta-ganti)
-    console.log("[INFO] Waiting for domain suggestion to appear...");
-    await this.page.waitForFunction(
-      () => {
-        const inputs = Array.from(document.querySelectorAll('input[id^="TextField"]'));
-        // Mencari input yang punya value (biasanya auto-filled oleh MS)
-        const domainInput = inputs.find(el => el.value && el.value.length > 5);
-        return domainInput !== undefined;
-      },
-      { timeout: 60000 },
-    );
+    await this.waitForDomainSuggestion();
 
-    console.log("[INFO] Domain suggestion detected, proceeding...");
-    await this.page.waitForTimeout(1000); // Small pause for stability
+    await this.page.waitForTimeout(1000);
 
+    await this.page.locator('[data-testid="pwdField"]').click();
     await this.page
       .locator('[data-testid="pwdField"]')
-      .fill(config.microsoftAccount.password);
+      .pressSequentially(config.microsoftAccount.password, {
+        delay: Math.floor(Math.random() * 40) + 60,
+      });
+
+    await this.humanDelay(500, 1000);
+
+    await this.page.locator('[data-testid="cPwdField"]').click();
     await this.page
       .locator('[data-testid="cPwdField"]')
-      .fill(config.microsoftAccount.password);
+      .pressSequentially(config.microsoftAccount.password, {
+        delay: Math.floor(Math.random() * 40) + 60,
+      });
 
-    await this.page.evaluate(() => {
-      document.querySelector('[data-bi-id="AutoDomainNext"]').click();
-    });
+    await this.humanDelay(1000, 2000);
+
+    const nextBtn = this.page.locator('[data-bi-id="AutoDomainNext"]');
+    await nextBtn.waitFor({ state: "visible" });
+    await this.randomMouseMove();
+    await nextBtn.click();
   }
 
   async goToPaymentPage() {
-    console.log("[STEP 7] Waiting until payment page appears");
+    console.log("[STEP 12] Waiting until payment page appears");
 
     await this.page
       .locator("text=Add payment method")
       .waitFor({ timeout: 100000 });
 
     console.log("Payment page detected");
+  }
+
+  async fillPaymentDetails() {
+    console.log("[STEP 13] Filling VCC payment details");
+
+    // Tunggu input card number muncul
+    await this.page.waitForSelector("#accountToken", { timeout: 60000 });
+
+    // Fill Card Number
+    console.log("Typing card number...");
+    await this.page.locator("#accountToken").click();
+    await this.page
+      .locator("#accountToken")
+      .pressSequentially(config.payment.cardNumber, {
+        delay: Math.floor(Math.random() * 30) + 50,
+      });
+    await this.humanDelay(800, 1500);
+
+    // Fill CVV
+    console.log("Typing CVV...");
+    await this.page.locator("#cvvToken").click();
+    await this.page.locator("#cvvToken").pressSequentially(config.payment.cvv, {
+      delay: Math.floor(Math.random() * 40) + 70,
+    });
+    await this.humanDelay(1000, 2000);
+
+    // Select Expiry Month
+    console.log("Selecting expiry month:", config.payment.expMonth);
+    await this.selectDropdownByText(
+      "#input_expiryMonth",
+      config.payment.expMonth,
+    );
+    await this.humanDelay(800, 1500);
+
+    // Select Expiry Year
+    console.log("Selecting expiry year:", config.payment.expYear);
+    await this.selectDropdownByText(
+      "#input_expiryYear",
+      config.payment.expYear,
+    );
+    await this.humanDelay(1000, 2000);
+
+    console.log("VCC details filled");
+  }
+
+  async clickSavePaymentButton() {
+    console.log("[STEP 14] Clicking Save progress button");
+
+    const saveBtn = this.page.locator('[data-bi-id="SignupSave"]');
+    await saveBtn.waitFor({ state: "visible" });
+    await this.randomMouseMove();
+    await saveBtn.click();
+  }
+
+  async clickStartTrialButton() {
+    console.log("[STEP 15] Finalizing - Waiting for trial agreement checkbox...");
+
+    // Tunggu sampai checkbox muncul
+    try {
+      const checkboxLocator = this.page.locator(".ms-Checkbox");
+      await checkboxLocator.waitFor({ state: "visible", timeout: 120000 });
+
+      const input = checkboxLocator.locator('input[type="checkbox"]');
+      const isChecked = await input.isChecked();
+
+      if (!isChecked) {
+        console.log("Checkbox not checked, clicking label...");
+        await this.randomMouseMove();
+        
+        // Klik label atau container lebih reliable untuk UI Microsoft
+        await checkboxLocator.locator("label").click({ force: true });
+        
+        // Verifikasi apakah sudah ter-check
+        await this.page.waitForTimeout(1000);
+        if (!(await input.isChecked())) {
+            console.log("Still not checked, trying direct input click...");
+            await input.click({ force: true });
+        }
+        
+        console.log("Agreement checkbox checked");
+      } else {
+        console.log("Agreement checkbox is already checked");
+      }
+    } catch (e) {
+      console.warn("Agreement checkbox not found or timeout (120s):", e.message);
+    }
+    await this.humanDelay(1500, 3000);
+
+    console.log("Waiting for Start Trial button...");
+
+    const startTrialBtn = this.page.getByRole("button", { name: /Start/i });
+
+    await startTrialBtn.waitFor({
+      state: "visible",
+      timeout: 60000,
+    });
+
+    // Tunggu sampai button tidak disabled
+    await this.page.waitForFunction(
+      () => {
+        const btn = Array.from(document.querySelectorAll("button")).find((b) =>
+          /start/i.test(b.innerText),
+        );
+        return (
+          btn && !btn.disabled && btn.getAttribute("aria-disabled") !== "true"
+        );
+      },
+      { timeout: 20000 },
+    );
+
+    await this.randomMouseMove();
+
+    await startTrialBtn.click();
+
+    console.log("Start trial button clicked");
   }
 
   async pauseForManualPayment() {
@@ -329,7 +511,10 @@ class MicrosoftBot {
     if (config.profilePath && fs.existsSync(config.profilePath)) {
       try {
         fs.rmSync(config.profilePath, { recursive: true, force: true });
-        console.log("[CLEANUP] Local profile folder deleted:", config.profilePath);
+        console.log(
+          "[CLEANUP] Local profile folder deleted:",
+          config.profilePath,
+        );
       } catch (e) {
         console.warn("[CLEANUP] Could not delete profile folder:", e.message);
       }
@@ -339,35 +524,76 @@ class MicrosoftBot {
   async run() {
     try {
       await this.connect();
+      await this.humanDelay(1000, 3000);
       await this.openMicrosoftPage();
       if (await this.checkForError()) return;
+      await this.humanDelay(2000, 5000);
 
       await this.clickTryButton();
       if (await this.checkForError()) return;
+      await this.humanDelay(2000, 4000);
 
       await this.clickBuildCartNextButton();
       if (await this.checkForError()) return;
+      await this.humanDelay(1500, 3000);
 
       await this.fillEmail();
       if (await this.checkForError()) return;
+      await this.humanDelay(1000, 2500);
 
       await this.clickCollectEmailNextButton();
       if (await this.checkForError()) return;
+      await this.humanDelay(2000, 4000);
 
       await this.clickConfirmEmailSetupAccountButton();
       if (await this.checkForError()) return;
+      await this.humanDelay(2000, 4000);
 
       await this.fillBasicInfo();
       if (await this.checkForError()) return;
+      await this.humanDelay(1500, 3500);
 
       await this.clickUseThisAddressButton();
       if (await this.checkForError()) return;
+      await this.humanDelay(1500, 3000);
 
       await this.fillPassword();
       if (await this.checkForError()) return;
+      await this.humanDelay(2000, 5000);
 
       //   await this.waitForManualSteps();
       await this.goToPaymentPage();
+      await this.humanDelay(2000, 4000);
+
+      await this.fillPaymentDetails();
+      await this.humanDelay(2000, 5000);
+
+      await this.clickSavePaymentButton();
+
+      // Tunggu page loading/proses simpan (bisa lama)
+      console.log("[INFO] Waiting for page transition after Save...");
+      try {
+        await this.page.waitForSelector(
+          '#pidlddc-button-userEnteredButton, input[type="checkbox"]',
+          {
+            state: "visible",
+            timeout: 120000,
+          },
+        );
+      } catch (e) {
+        console.log(
+          "[INFO] Timeout waiting for next step elements, checking manually...",
+        );
+      }
+
+      // Selalu cek konfirmasi alamat (jika ada)
+      await this.clickUseThisAddressButton();
+      await this.humanDelay(1500, 3000);
+
+      // Terakhir klik Start Trial
+      await this.clickStartTrialButton();
+      await this.humanDelay(5000, 10000);
+
       await this.pauseForManualPayment();
 
       console.log("Automation completed safely");
