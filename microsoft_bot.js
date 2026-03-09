@@ -662,12 +662,65 @@ class MicrosoftBot {
     console.log("Save/Start Trial button clicked");
   }
 
-  async pauseForManualPayment() {
-    console.log(
-      "Please enter payment details manually. Automation will wait...",
-    );
+  async clickPostTrialNextButton() {
+    console.log("[STEP 15] Clicking Next button after Start Trial");
 
-    await this.page.waitForTimeout(180000);
+    const nextBtn = this.getGenericButton("Next");
+    await nextBtn.waitFor({ state: "visible", timeout: 120000 });
+    await this.randomMouseMove();
+    await this.humanDelay(300, 600);
+    await nextBtn.click();
+
+    console.log("[STEP 15] Next button clicked, waiting for confirmation page...");
+    await this.waitForPage();
+  }
+
+  async extractDomainEmail() {
+    console.log("[STEP 16] Extracting domain email from confirmation page...");
+
+    await this.humanDelay(2000, 4000);
+
+    // Try to find span containing onmicrosoft.com email
+    const emailSpan = this.page
+      .locator("span")
+      .filter({ hasText: /@.*\.onmicrosoft\.com/i })
+      .first();
+
+    const found = await emailSpan
+      .waitFor({ state: "visible", timeout: 30000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (found) {
+      const rawText = await emailSpan.textContent();
+      // Extract just the email from the text content
+      const emailMatch = rawText.match(/[\w.+-]+@[\w.-]+\.onmicrosoft\.com/i);
+      const domainEmail = emailMatch ? emailMatch[0].trim() : rawText.trim();
+      console.log("[STEP 16] Domain email found:", domainEmail);
+      return domainEmail;
+    }
+
+    // Fallback: try any span with email pattern
+    const fallbackSpan = this.page
+      .locator("span")
+      .filter({ hasText: /[\w.+-]+@[\w.-]+\.[a-z]{2,}/i })
+      .first();
+
+    const fallbackFound = await fallbackSpan
+      .waitFor({ state: "visible", timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (fallbackFound) {
+      const rawText = await fallbackSpan.textContent();
+      const emailMatch = rawText.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
+      const domainEmail = emailMatch ? emailMatch[0].trim() : rawText.trim();
+      console.log("[STEP 16] Domain email found (fallback):", domainEmail);
+      return domainEmail;
+    }
+
+    console.warn("[STEP 16] Could not find domain email on the page");
+    return "";
   }
 
   async checkForError() {
@@ -789,12 +842,18 @@ class MicrosoftBot {
       await this.clickStartTrialButton();
       await this.humanDelay(800, 1500);
 
-      await this.pauseForManualPayment();
+      // Click Next setelah Start Trial
+      await this.clickPostTrialNextButton();
+      await this.humanDelay(800, 1500);
+
+      // Extract domain email dari halaman konfirmasi
+      const domainEmail = await this.extractDomainEmail();
 
       console.log("Automation completed safely");
+      return { success: true, domainEmail };
     } catch (error) {
       console.error("Automation error:", error);
-      await this.cleanup();
+      return { success: false, domainEmail: "", error: error.message };
     }
   }
 }

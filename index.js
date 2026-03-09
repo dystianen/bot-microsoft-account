@@ -3,6 +3,47 @@ const MicrosoftBot = require('./microsoft_bot');
 const config = require('./config');
 const XLSX = require('xlsx');
 
+const EXCEL_FILE = './accounts.xlsx';
+
+// Simple promise-based lock to prevent concurrent Excel writes
+let writeLock = Promise.resolve();
+
+function writeResultToExcel(rowIndex, status, domainEmail) {
+  writeLock = writeLock.then(() => {
+    try {
+      const workbook = XLSX.readFile(EXCEL_FILE);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+
+      // Ensure new column headers exist (row 1 in Excel)
+      sheet['R1'] = { t: 's', v: 'Status' };
+      sheet['S1'] = { t: 's', v: 'Domain Email' };
+
+      // Data row = rowIndex + 2 (1-indexed, row 1 = header)
+      const excelRow = rowIndex + 2;
+      sheet[`R${excelRow}`] = { t: 's', v: status };
+      sheet[`S${excelRow}`] = { t: 's', v: domainEmail || '' };
+
+      // Expand sheet range to include new columns
+      const range = XLSX.utils.decode_range(sheet['!ref']);
+      if (range.e.c < 18) range.e.c = 18; // Column S = index 18
+      sheet['!ref'] = XLSX.utils.encode_range(range);
+
+      // Add column widths for new columns
+      if (!sheet['!cols']) sheet['!cols'] = [];
+      while (sheet['!cols'].length < 19) sheet['!cols'].push({});
+      sheet['!cols'][17] = { wch: 12 }; // Status
+      sheet['!cols'][18] = { wch: 40 }; // Domain Email
+
+      XLSX.writeFile(workbook, EXCEL_FILE);
+      console.log(`[Excel] Row ${excelRow} updated: Status=${status}, Domain=${domainEmail || 'N/A'}`);
+    } catch (err) {
+      console.error(`[Excel] Failed to write result for row ${rowIndex + 2}:`, err.message);
+    }
+  });
+  return writeLock;
+}
+
 async function processSingleAccount(accountConfig, index, total) {
   const profileName = `MS-Account-${Date.now()}-${index}`;
   
@@ -10,6 +51,7 @@ async function processSingleAccount(accountConfig, index, total) {
   
   let currentProfileId = null;
   let bot = null;
+  let result = null;
 
   try {
     // 1. Create AdsPower profile
@@ -24,11 +66,19 @@ async function processSingleAccount(accountConfig, index, total) {
 
     // 3. Run Microsoft automation
     bot = new MicrosoftBot(wsUrl, accountConfig);
-    await bot.run();
-    console.log(`[Account ${index + 1}] Automation finished successfully.`);
+    result = await bot.run();
+
+    if (result && result.success) {
+      console.log(`[Account ${index + 1}] Automation finished successfully. Domain: ${result.domainEmail}`);
+      await writeResultToExcel(index, 'SUCCESS', result.domainEmail);
+    } else {
+      console.error(`[Account ${index + 1}] Automation failed: ${result?.error || 'Unknown error'}`);
+      await writeResultToExcel(index, 'FAILED', '');
+    }
     
   } catch (err) {
     console.error(`\n[ERROR Account ${index + 1}] failed:`, err.message);
+    await writeResultToExcel(index, 'ERROR', '');
   } finally {
     console.log(`[Account ${index + 1}] Starting cleanup...`);
     
@@ -59,7 +109,7 @@ async function processSingleAccount(accountConfig, index, total) {
 async function main() {
   try {
     // Read accounts from Excel file
-    const workbook = XLSX.readFile('./accounts.xlsx');
+    const workbook = XLSX.readFile(EXCEL_FILE);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
