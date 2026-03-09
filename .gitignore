@@ -1,0 +1,8 @@
+packagae-log.json
+node_modules
+.DS_Store
+.env
+.env.example
+.env.local
+.env.production
+.env.development
