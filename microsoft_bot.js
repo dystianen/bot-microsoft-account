@@ -766,59 +766,73 @@ class MicrosoftBot {
   }
 
   async run() {
+    let currentStep = "Initializing";
     try {
+      currentStep = "Connecting to browser";
       await this.connect();
       await this.humanDelay(1000, 3000);
+
+      currentStep = "Opening Microsoft page";
       await this.openMicrosoftPage();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected during initial load");
       await this.humanDelay(400, 800);
 
+      currentStep = "Clicking Try button";
       await this.clickTryButton();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after Try button");
       await this.humanDelay(400, 800);
 
+      currentStep = "Building cart";
       await this.clickBuildCartNextButton();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected during building cart");
       await this.humanDelay(300, 600);
 
+      currentStep = "Filling email";
       await this.fillEmail();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after filling email");
       await this.humanDelay(1000, 2500);
 
+      currentStep = "Confirming email email";
       await this.clickCollectEmailNextButton();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after confirming email");
       await this.humanDelay(400, 800);
 
+      currentStep = "Setup account button";
       await this.clickConfirmEmailSetupAccountButton();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after setup button");
       await this.humanDelay(400, 800);
 
+      currentStep = "Filling basic info";
       await this.fillBasicInfo();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after basic info");
       await this.humanDelay(1500, 3500);
 
+      currentStep = "Confirming address (Stage 1)";
       await this.clickUseThisAddressButton();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after address confirmation");
       await this.humanDelay(300, 600);
 
+      currentStep = "Filling password";
       await this.fillPassword();
-      if (await this.checkForError()) return;
+      if (await this.checkForError()) throw new Error("Microsoft error page detected after filling password");
       await this.humanDelay(400, 800);
 
-      // Cek apakah minta Sign In manual setelah isi password
+      currentStep = "Handling manual sign in (if any)";
       await this.handleOptionalSignIn();
       await this.humanDelay(400, 800);
 
-      //   await this.waitForManualSteps();
+      currentStep = "Going to payment page";
       await this.goToPaymentPage();
       await this.humanDelay(400, 800);
 
+      currentStep = "Filling VCC payment details";
       await this.fillPaymentDetails();
       await this.humanDelay(400, 800);
 
+      currentStep = "Saving payment";
       await this.clickSavePaymentButton();
 
-      // Tunggu page loading/proses simpan (bisa lama)
+      currentStep = "Waiting for page transition after Sav";
       console.log("[INFO] Waiting for page transition after Save...");
       try {
         await this.page.waitForSelector(
@@ -834,26 +848,30 @@ class MicrosoftBot {
         );
       }
 
-      // Selalu cek konfirmasi alamat (jika ada)
+      currentStep = "Confirming address (Stage 2)";
       await this.clickUseThisAddressButton();
       await this.humanDelay(300, 600);
 
-      // Terakhir klik Start Trial
+      currentStep = "Clicking Start Trial";
       await this.clickStartTrialButton();
       await this.humanDelay(800, 1500);
 
-      // Click Next setelah Start Trial
+      currentStep = "Finishing trial setup";
       await this.clickPostTrialNextButton();
       await this.humanDelay(800, 1500);
 
-      // Extract domain email dari halaman konfirmasi
+      currentStep = "Extracting domain email";
       const domainEmail = await this.extractDomainEmail();
 
       console.log("Automation completed safely");
       return { success: true, domainEmail };
     } catch (error) {
-      console.error("Automation error:", error);
-      return { success: false, domainEmail: "", error: error.message };
+      console.error(`Automation error at step [${currentStep}]:`, error);
+      return { 
+        success: false, 
+        domainEmail: "", 
+        error: `Step: ${currentStep} - Error: ${error.message}` 
+      };
     }
   }
 }
