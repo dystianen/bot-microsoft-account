@@ -1,7 +1,7 @@
 const adsPowerHelper = require('./adspower_helper');
 const MicrosoftBot = require('./microsoft_bot');
 const config = require('./config');
-const fs = require('fs');
+const XLSX = require('xlsx');
 
 async function processSingleAccount(accountConfig, index, total) {
   const profileName = `MS-Account-${Date.now()}-${index}`;
@@ -58,9 +58,35 @@ async function processSingleAccount(accountConfig, index, total) {
 
 async function main() {
   try {
-    // Read accounts from JSON file
-    const accountsData = fs.readFileSync('./accounts.json', 'utf8');
-    const accounts = JSON.parse(accountsData);
+    // Read accounts from Excel file
+    const workbook = XLSX.readFile('./accounts.xlsx');
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    // Map flat Excel rows to nested accountConfig structure
+    const accounts = rows.map((row) => ({
+      microsoftAccount: {
+        email: String(row['Email'] || ''),
+        password: String(row['Password'] || ''),
+        firstName: String(row['First Name'] || ''),
+        lastName: String(row['Last Name'] || ''),
+        companyName: String(row['Company Name'] || ''),
+        companySize: String(row['Company Size'] || '1 person'),
+        phone: String(row['Phone'] || ''),
+        jobTitle: String(row['Job Title'] || ''),
+        address: String(row['Address'] || ''),
+        city: String(row['City'] || ''),
+        state: String(row['State'] || ''),
+        postalCode: String(row['Postal Code'] || ''),
+        country: String(row['Country'] || 'United States'),
+      },
+      payment: {
+        cardNumber: String(row['Card Number'] || ''),
+        cvv: String(row['CVV'] || ''),
+        expMonth: String(row['Exp Month'] || ''),
+        expYear: String(row['Exp Year'] || ''),
+      },
+    }));
 
     const concurrencyLimit = config.concurrencyLimit || 3;
     console.log(`Loaded ${accounts.length} accounts. Concurrency limit: ${concurrencyLimit}`);
