@@ -539,25 +539,31 @@ class MicrosoftBot {
 
     console.log("Waiting for payment validation...");
 
-    const errorMsg = this.page
-      .locator('[data-automation-id="error-message"], .ms-MessageBar--error')
-      .first();
+    const errorMsg = this.page.locator(
+      '[data-automation-id="error-message"], .ms-MessageBar--error',
+    );
 
-    try {
-      // Tunggu maksimal 30 detik apakah error muncul
-      await errorMsg.waitFor({ state: "visible", timeout: 30000 });
+    const successIndicator = this.page.locator(
+      '#pidlddc-button-userEnteredButton, input[type="checkbox"]',
+    );
 
-      const text = await errorMsg.textContent();
-      throw new Error(`PAYMENT_DECLINED: ${text.trim()}`);
-    } catch (e) {
-      if (e.message.includes("PAYMENT_DECLINED")) {
-        throw e;
-      }
+    const result = await Promise.race([
+      errorMsg
+        .waitFor({ state: "visible", timeout: 60000 })
+        .then(() => "error"),
+      successIndicator
+        .waitFor({ state: "visible", timeout: 60000 })
+        .then(() => "success"),
+      this.page.waitForLoadState("networkidle").then(() => "networkidle"),
+    ]);
 
-      console.log("No payment error detected after validation.");
+    if (result === "error") {
+      const text = await errorMsg.first().textContent();
+      throw new Error(`PAYMENT_DECLINED: ${text?.trim()}`);
     }
-  }
 
+    console.log("Payment validation finished:", result);
+  }
   async clickStartTrialButton() {
     console.log("[SAVE] Waiting for checklist checkbox...");
 
