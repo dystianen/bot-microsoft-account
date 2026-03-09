@@ -28,15 +28,19 @@ class MicrosoftBot {
 
   getGenericLocator(keyword, elementType = "input") {
     // Cari elemen berdasarkan substring keyword yang case-insensitive di berbagai attribute
-    return this.page.locator(
-      `${elementType}[id*="${keyword}" i], ${elementType}[data-testid*="${keyword}" i], ${elementType}[data-bi-id*="${keyword}" i], ${elementType}[name*="${keyword}" i], ${elementType}[aria-label*="${keyword}" i]`
-    ).first();
+    return this.page
+      .locator(
+        `${elementType}[id*="${keyword}" i], ${elementType}[data-testid*="${keyword}" i], ${elementType}[data-bi-id*="${keyword}" i], ${elementType}[name*="${keyword}" i], ${elementType}[aria-label*="${keyword}" i]`,
+      )
+      .first();
   }
 
   getGenericButton(keyword) {
-    return this.page.locator(
-      `button[id*="${keyword}" i], button[data-testid*="${keyword}" i], button[data-bi-id*="${keyword}" i], a[data-bi-id*="${keyword}" i], button:has-text("${keyword}"), a:has-text("${keyword}")`
-    ).first();
+    return this.page
+      .locator(
+        `button[id*="${keyword}" i], button[data-testid*="${keyword}" i], button[data-bi-id*="${keyword}" i], a[data-bi-id*="${keyword}" i], button:has-text("${keyword}"), a:has-text("${keyword}")`,
+      )
+      .first();
   }
 
   async waitForPage(selector) {
@@ -134,7 +138,7 @@ class MicrosoftBot {
 
     // Tunggu verifikasi manual selesai, baru lanjut ke setup account
     console.log("[INFO] Waiting for email verification to complete...");
-    
+
     // Tunggu button Setup muncul
     const setupBtn = this.getGenericButton("Setup");
     await setupBtn.waitFor({ state: "visible", timeout: 150000 });
@@ -153,7 +157,10 @@ class MicrosoftBot {
     console.log("[STEP 8] Filling basic info");
 
     // Tunggu field first name / nama awal muncul
-    await this.getGenericLocator("first").waitFor({ state: "visible", timeout: 30000 });
+    await this.getGenericLocator("first").waitFor({
+      state: "visible",
+      timeout: 30000,
+    });
 
     // Fill semua text fields secara human-like
     const fields = [
@@ -189,9 +196,12 @@ class MicrosoftBot {
 
     const addressLocator = this.getGenericLocator("address");
     await addressLocator.click();
-    await addressLocator.pressSequentially(this.accountConfig.microsoftAccount.address, {
+    await addressLocator.pressSequentially(
+      this.accountConfig.microsoftAccount.address,
+      {
         delay: Math.floor(Math.random() * 30) + 50,
-      });
+      },
+    );
     await this.humanDelay(500, 1000);
 
     // Input City
@@ -203,11 +213,18 @@ class MicrosoftBot {
     await this.humanDelay(500, 1000);
 
     // Postal code (zip atau postal)
-    const postalLocator = this.page.locator('input[id*="postal" i], input[id*="zip" i], input[data-testid*="postal" i], input[data-testid*="zip" i]').first();
+    const postalLocator = this.page
+      .locator(
+        'input[id*="postal" i], input[id*="zip" i], input[data-testid*="postal" i], input[data-testid*="zip" i]',
+      )
+      .first();
     await postalLocator.click();
-    await postalLocator.pressSequentially(this.accountConfig.microsoftAccount.postalCode, {
+    await postalLocator.pressSequentially(
+      this.accountConfig.microsoftAccount.postalCode,
+      {
         delay: Math.floor(Math.random() * 30) + 50,
-      });
+      },
+    );
     await this.humanDelay(800, 1500);
 
     // Pilih company size (random)
@@ -219,28 +236,35 @@ class MicrosoftBot {
 
     // Pilih state Alabama (sesuai config)
     await this.selectDropdownByText(
-        'div[role="combobox"][id*="region" i], div[role="combobox"][id*="state" i], select[id*="region" i]', 
-        this.accountConfig.microsoftAccount.state || "Alabama"
+      'div[role="combobox"][id*="region" i], div[role="combobox"][id*="state" i], select[id*="region" i]',
+      this.accountConfig.microsoftAccount.state || "Alabama",
     );
     await this.humanDelay(600, 1200);
 
     // Pilih No untuk website
-    await this.selectDropdownByText('div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]', "No");
+    await this.selectDropdownByText(
+      'div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]',
+      "No",
+    );
     await this.humanDelay(600, 1200);
 
     // Check partner checkbox
     try {
-        // Cari container label yang di dalamnya ada input checkbox partner
-        const partnerLabel = this.page.locator('label:has(input[type="checkbox"][id*="partner" i]), label:has(input[type="checkbox"][id*="promo" i]), label[for*="partner" i]').first();
-        if (await partnerLabel.count() > 0) {
-            const input = partnerLabel.locator('input[type="checkbox"]');
-            const isChecked = await input.isChecked();
-            if (!isChecked) {
-                await this.randomMouseMove();
-                await partnerLabel.click();
-            }
+      // Cari container label yang di dalamnya ada input checkbox partner
+      const partnerLabel = this.page
+        .locator(
+          'label:has(input[type="checkbox"][id*="partner" i]), label:has(input[type="checkbox"][id*="promo" i]), label[for*="partner" i]',
+        )
+        .first();
+      if ((await partnerLabel.count()) > 0) {
+        const input = partnerLabel.locator('input[type="checkbox"]');
+        const isChecked = await input.isChecked();
+        if (!isChecked) {
+          await this.randomMouseMove();
+          await partnerLabel.click();
         }
-    } catch(e) {}
+      }
+    } catch (e) {}
 
     await this.humanDelay(1000, 2000);
 
@@ -318,17 +342,21 @@ class MicrosoftBot {
     console.log("[STEP 10] Checking for address confirmation button...");
 
     try {
-      const btn = this.page.locator('button[id*="addressUse" i], button[id*="userEntered" i], button:has-text("Use this address")').first();
+      const btn = this.page
+        .locator(
+          'button[id*="addressUse" i], button[id*="userEntered" i], button:has-text("Use this address")',
+        )
+        .first();
       await btn.waitFor({ state: "visible", timeout: 15000 });
 
       await this.randomMouseMove();
       await btn.click();
 
-      console.log("[STEP 10] Address confirmation button clicked");
+      console.log("[STEP 10.5] Address confirmation button clicked");
       await this.humanDelay(1000, 2000);
     } catch {
       console.log(
-        "[STEP 10] Address confirmation button not found, skipping...",
+        "[STEP 10.5] Address confirmation button not found, skipping...",
       );
     }
   }
@@ -353,25 +381,35 @@ class MicrosoftBot {
     console.log("[STEP 11] Filling password");
 
     // Menggunakan regex untuk membedakan password utama dan retype password
-    const passwordLocator = this.page.locator('input[type="password"]:not([id*="retype" i]):not([id*="confirm" i]):not([data-testid*="cpwd" i])').first();
-    const confirmPasswordLocator = this.page.locator('input[type="password"]').nth(1);
+    const passwordLocator = this.page
+      .locator(
+        'input[type="password"]:not([id*="retype" i]):not([id*="confirm" i]):not([data-testid*="cpwd" i])',
+      )
+      .first();
+    const confirmPasswordLocator = this.page
+      .locator('input[type="password"]')
+      .nth(1);
 
     await passwordLocator.waitFor({ state: "visible", timeout: 30000 });
 
     await this.randomMouseMove();
     await passwordLocator.click({ force: true }).catch(() => {});
-    await passwordLocator
-      .pressSequentially(this.accountConfig.microsoftAccount.password, {
+    await passwordLocator.pressSequentially(
+      this.accountConfig.microsoftAccount.password,
+      {
         delay: Math.floor(Math.random() * 100) + 100, // Ketik pelan
-      });
+      },
+    );
 
     await this.humanDelay(500, 1000);
 
     await confirmPasswordLocator.click({ force: true }).catch(() => {});
-    await confirmPasswordLocator
-      .pressSequentially(this.accountConfig.microsoftAccount.password, {
+    await confirmPasswordLocator.pressSequentially(
+      this.accountConfig.microsoftAccount.password,
+      {
         delay: Math.floor(Math.random() * 40) + 60,
-      });
+      },
+    );
 
     await this.humanDelay(1000, 2000);
 
@@ -388,7 +426,7 @@ class MicrosoftBot {
       // Tunggu sebentar untuk lihat apakah button Sign In muncul
       const signInBtn = this.getGenericButton("Sign In");
       const isVisible = await signInBtn
-        .isVisible({ timeout: 10000 })
+        .isVisible({ timeout: 15000 })
         .catch(() => false);
 
       if (isVisible) {
@@ -399,11 +437,17 @@ class MicrosoftBot {
         await this.humanDelay(2000, 4000);
 
         // Setelah click Sign In, biasanya ada prompt "Stay signed in?"
-        const staySignedInBtn = this.page.locator('button[id*="idSIButton" i], input[id*="idSIButton" i], button[type="submit"], input[type="submit"]').first();
+        const staySignedInBtn = this.page
+          .locator(
+            'button[id*="idSIButton" i], input[id*="idSIButton" i], button[type="submit"], input[type="submit"]',
+          )
+          .first();
         if (
           await staySignedInBtn.isVisible({ timeout: 15000 }).catch(() => false)
         ) {
-          console.log("Stay signed in? prompt detected, clicking Yes/Submit...");
+          console.log(
+            "Stay signed in? prompt detected, clicking Yes/Submit...",
+          );
           await this.randomMouseMove();
           await staySignedInBtn.click();
         }
@@ -429,32 +473,39 @@ class MicrosoftBot {
     console.log("[STEP 13] Filling VCC payment details");
 
     // Tunggu input card number muncul dengan locator lebih fleksibel
-    const cardLocator = this.page.locator('input[id*="accounttoken" i], input[id*="card" i], input[data-testid*="card" i]').first();
+    const cardLocator = this.page
+      .locator(
+        'input[id*="accounttoken" i], input[id*="card" i], input[data-testid*="card" i]',
+      )
+      .first();
     await cardLocator.waitFor({ state: "visible", timeout: 60000 });
 
     // Fill Card Number
     console.log("Typing card number...");
     await cardLocator.click();
-    await cardLocator
-      .pressSequentially(this.accountConfig.payment.cardNumber, {
-        delay: Math.floor(Math.random() * 30) + 50,
-      });
+    await cardLocator.pressSequentially(this.accountConfig.payment.cardNumber, {
+      delay: Math.floor(Math.random() * 30) + 50,
+    });
     await this.humanDelay(800, 1500);
 
     // Fill CVV
     console.log("Typing CVV...");
-    const cvvLocator = this.page.locator('input[id*="cvv" i], input[data-testid*="cvv" i], input[name*="cvv" i]').first();
+    const cvvLocator = this.page
+      .locator(
+        'input[id*="cvv" i], input[data-testid*="cvv" i], input[name*="cvv" i]',
+      )
+      .first();
     await cvvLocator.click();
-    await cvvLocator
-      .pressSequentially(this.accountConfig.payment.cvv, {
-        delay: Math.floor(Math.random() * 30) + 50,
-      });
+    await cvvLocator.pressSequentially(this.accountConfig.payment.cvv, {
+      delay: Math.floor(Math.random() * 30) + 50,
+    });
     await this.humanDelay(800, 1500);
 
     // Select Expiry Month
     console.log("Selecting expiry month:", this.accountConfig.payment.expMonth);
     // Untuk dropdown, cari custom selector atau fallback
-    const expMonthLocatorString = 'div[role="combobox"][id*="month" i], div[role="combobox"][data-testid*="month" i], select[id*="month" i]';
+    const expMonthLocatorString =
+      'div[role="combobox"][id*="month" i], div[role="combobox"][data-testid*="month" i], select[id*="month" i]';
     await this.selectDropdownByText(
       expMonthLocatorString,
       this.accountConfig.payment.expMonth,
@@ -463,7 +514,8 @@ class MicrosoftBot {
 
     // Select Expiry Year
     console.log("Selecting expiry year:", this.accountConfig.payment.expYear);
-    const expYearLocatorString = 'div[role="combobox"][id*="year" i], div[role="combobox"][data-testid*="year" i], select[id*="year" i]';
+    const expYearLocatorString =
+      'div[role="combobox"][id*="year" i], div[role="combobox"][data-testid*="year" i], select[id*="year" i]';
     await this.selectDropdownByText(
       expYearLocatorString,
       this.accountConfig.payment.expYear,
@@ -476,23 +528,33 @@ class MicrosoftBot {
   async clickSavePaymentButton() {
     console.log("[STEP 14] Clicking Save progress button");
 
-    const saveBtn = this.page.locator('button[data-bi-id*="Save" i], button:has-text("Save")').first();
+    const saveBtn = this.page
+      .locator('button[data-bi-id*="Save" i], button:has-text("Save")')
+      .first();
+
     await saveBtn.waitFor({ state: "visible" });
+
     await this.randomMouseMove();
     await saveBtn.click();
 
-    console.log("Checking for payment errors...");
+    console.log("Waiting for payment validation...");
+
+    const errorMsg = this.page
+      .locator('[data-automation-id="error-message"], .ms-MessageBar--error')
+      .first();
+
     try {
-        const errorMsg = this.page.locator('[data-automation-id="error-message"], .ms-MessageBar--error').first();
-        // Cek cepat jika ada error muncul dalam 5 detik
-        await errorMsg.waitFor({ state: "visible", timeout: 5000 });
-        const text = await errorMsg.textContent();
-        throw new Error(`PAYMENT_DECLINED: ${text.trim()}`);
+      // Tunggu maksimal 30 detik apakah error muncul
+      await errorMsg.waitFor({ state: "visible", timeout: 30000 });
+
+      const text = await errorMsg.textContent();
+      throw new Error(`PAYMENT_DECLINED: ${text.trim()}`);
     } catch (e) {
-        if (e.message.includes("PAYMENT_DECLINED")) {
-            throw e; // Lemparkan error ke run() catch block agar profile dihapus
-        }
-        console.log("No immediate payment errors detected.");
+      if (e.message.includes("PAYMENT_DECLINED")) {
+        throw e;
+      }
+
+      console.log("No payment error detected after validation.");
     }
   }
 
@@ -554,14 +616,17 @@ class MicrosoftBot {
     // Target the specific disabled button and wait for it to become enabled
     const saveBtn = this.page
       .locator('button[class*="primary" i], button[data-bi-id*="save" i]')
-      .filter({ hasText: /start trial|save/i }).first();
+      .filter({ hasText: /start trial|save/i })
+      .first();
 
     await saveBtn.waitFor({ state: "visible", timeout: 30000 });
 
     // Poll until aria-disabled is removed
     await this.page.waitForFunction(
       () => {
-        const btn = Array.from(document.querySelectorAll("button")).find(b => /start trial|save/i.test(b.textContent));
+        const btn = Array.from(document.querySelectorAll("button")).find((b) =>
+          /start trial|save/i.test(b.textContent),
+        );
         return (
           btn &&
           !btn.disabled &&
