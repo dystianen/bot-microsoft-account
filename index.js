@@ -5,87 +5,49 @@ const fs = require("fs");
 const XLSX = require("xlsx");
 
 const EXCEL_FILE = "./accounts_result.xlsx";
+const HISTORY_FILE = "./history.json";
 
-function generateExcelReport(accounts, results) {
-  const data = accounts.map((acc, index) => {
-    const res = results[index] || { status: "FAILED", domainEmail: "", domainPassword: "", log: "Incomplete execution" };
-    
-    return {
-      "Email": acc.microsoftAccount.email,
-      "Password": acc.microsoftAccount.password,
-      "First Name": acc.microsoftAccount.firstName,
-      "Last Name": acc.microsoftAccount.lastName,
-      "Company Name": acc.microsoftAccount.companyName,
-      "Company Size": acc.microsoftAccount.companySize || "1 person",
-      "Phone": acc.microsoftAccount.phone,
-      "Job Title": acc.microsoftAccount.jobTitle,
-      "Address": acc.microsoftAccount.address,
-      "City": acc.microsoftAccount.city,
-      "State": acc.microsoftAccount.state,
-      "Postal Code": acc.microsoftAccount.postalCode,
-      "Country": acc.microsoftAccount.country || "United States",
-      "Card Number": acc.payment.cardNumber,
-      "CVV": acc.payment.cvv,
-      "Exp Month": acc.payment.expMonth,
-      "Exp Year": acc.payment.expYear,
-      "Status": res.status,
-      "Domain Email": res.domainEmail || "",
-      "Domain Password": res.domainPassword || "",
-      "Log": res.log || ""
-    };
-  });
+let _saveQueue = Promise.resolve();
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Results");
-
-  // Adjust column widths
-  worksheet["!cols"] = [
-    { wch: 40 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 30 },
-    { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 30 }, { wch: 15 },
-    { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 20 }, { wch: 8 },
-    { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 45 }, { wch: 25 }, 
-    { wch: 50 },
-  ];
-
-  XLSX.writeFile(workbook, EXCEL_FILE);
-  console.log(`\n[Excel] Saved results to ${EXCEL_FILE}.`);
+function saveToHistory(result) {
+  if (result.status !== "SUCCESS") return;
+  _saveQueue = _saveQueue
+    .then(async () => {
+      let history = [];
+      if (fs.existsSync(HISTORY_FILE)) {
+        try {
+          history = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
+        } catch (e) {
+          history = [];
+        }
+      }
+      history.push({
+        domainEmail: result.domainEmail,
+        domainPassword: result.domainPassword,
+        timestamp: new Date().toISOString(),
+      });
+      fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+      updateExcelReport(history);
+    })
+    .catch((e) => console.error("[saveToHistory] Error:", e.message));
 }
 
-function loadAccounts() {
-  const paymentsFile = './payments.json';
-  const accountsFile = './microsoft_accounts.json';
-
-  if (!fs.existsSync(paymentsFile) || !fs.existsSync(accountsFile)) {
-    throw new Error('Required files (payments.json or microsoft_accounts.json) are missing.');
+function updateExcelReport(history) {
+  try {
+    const data = history.map((item) => ({
+      "Domain Email": item.domainEmail,
+      "Domain Password": item.domainPassword,
+      "Created Date": item.timestamp.split("T")[0],
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Success Accounts");
+    worksheet["!cols"] = [{ wch: 45 }, { wch: 25 }, { wch: 15 }];
+    XLSX.writeFile(workbook, EXCEL_FILE);
+    console.log(`[Excel] Report updated: ${history.length} record(s)`);
+  } catch (e) {
+    console.error("[Excel] Failed to write report:", e.message);
   }
-
-  const payments = JSON.parse(fs.readFileSync(paymentsFile, 'utf8'));
-  const microsoftAccounts = JSON.parse(fs.readFileSync(accountsFile, 'utf8'));
-  const maxPerPayment = config.maxAccountsPerPayment || 5;
-
-  console.log(`[Load] Found ${payments.length} payment methods and ${microsoftAccounts.length} Microsoft accounts.`);
-  console.log(`[Load] Max accounts per payment: ${maxPerPayment}`);
-
-  const pairedAccounts = [];
-
-  microsoftAccounts.forEach((msAcc, index) => {
-    // Calculate which payment to use
-    const paymentIndex = Math.floor(index / maxPerPayment);
-    
-    if (paymentIndex >= payments.length) {
-      console.warn(`[Warning] No payment method available for account ${index + 1} (${msAcc.email}). Skipping.`);
-      return;
-    }
-
-    pairedAccounts.push({
-      microsoftAccount: msAcc,
-      payment: payments[paymentIndex]
-    });
-  });
-
-  console.log(`[Load] Paired ${pairedAccounts.length} accounts for processing.`);
-  return pairedAccounts;
 }
 
 async function processSingleAccount(accountConfig, index, total) {
@@ -119,16 +81,31 @@ async function processSingleAccount(accountConfig, index, total) {
       console.log(
         `[Account ${index + 1}] Automation finished successfully. Domain: ${result.domainEmail} Password: ${accountConfig.microsoftAccount.password}`,
       );
-      executionResult = { status: "SUCCESS", domainEmail: result.domainEmail, domainPassword: accountConfig.microsoftAccount.password, log: "Completed successfully" };
+      executionResult = {
+        status: "SUCCESS",
+        domainEmail: result.domainEmail,
+        domainPassword: accountConfig.microsoftAccount.password,
+        log: "Completed successfully",
+      };
     } else {
       console.error(
         `[Account ${index + 1}] Automation failed: ${result?.error || "Unknown error"}`,
       );
-      executionResult = { status: "FAILED", domainEmail: "", domainPassword: "", log: result?.error || "Unknown automation error" };
+      executionResult = {
+        status: "FAILED",
+        domainEmail: "",
+        domainPassword: "",
+        log: result?.error || "Unknown automation error",
+      };
     }
   } catch (err) {
     console.error(`\n[ERROR Account ${index + 1}] failed:`, err.message);
-    executionResult = { status: "ERROR", domainEmail: "", domainPassword: "", log: err.message };
+    executionResult = {
+      status: "ERROR",
+      domainEmail: "",
+      domainPassword: "",
+      log: err.message,
+    };
   } finally {
     console.log(`[Account ${index + 1}] Starting cleanup...`);
 
@@ -145,84 +122,44 @@ async function processSingleAccount(accountConfig, index, total) {
     if (currentProfileId) {
       try {
         await adsPowerHelper.stopBrowser(currentProfileId);
-        // Wait a bit before deleting to ensure API process is ready
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        await adsPowerHelper.deleteProfile(currentProfileId);
-        console.log(`[Account ${index + 1}] AdsPower profile cleaned up.`);
-      } catch (cleanupError) {
-        console.error(
-          `[Account ${index + 1}] AdsPower cleanup error:`,
-          cleanupError.message,
+        console.log(`[Account ${index + 1}] Browser stopped.`);
+      } catch (e) {
+        console.warn(
+          `[Account ${index + 1}] stopBrowser warning (proceeding anyway):`,
+          e.message,
         );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 3000)); // 3s cukup, 10s terlalu lama
+
+      try {
+        await adsPowerHelper.deleteProfile(currentProfileId);
+        console.log(`[Account ${index + 1}] AdsPower profile deleted.`);
+      } catch (e) {
+        console.error(`[Account ${index + 1}] deleteProfile error:`, e.message);
       }
     }
 
     if (!executionResult) {
-      executionResult = { status: "FAILED", domainEmail: "", domainPassword: "", log: "Incomplete execution" };
+      executionResult = {
+        status: "FAILED",
+        domainEmail: "",
+        domainPassword: "",
+        log: "Incomplete execution",
+      };
+    }
+
+    // Save to global history if success
+    if (executionResult.status === "SUCCESS") {
+      saveToHistory(executionResult);
     }
   }
-  
+
   return executionResult;
-}
-
-async function main() {
-  try {
-    // Load paired accounts
-    const accounts = loadAccounts();
-
-    const concurrencyLimit = config.concurrencyLimit || 3;
-    console.log(
-      `Loaded ${accounts.length} paired accounts. Concurrency limit: ${concurrencyLimit}`,
-    );
-
-    const executing = new Set();
-    const tasks = [];
-    const results = new Array(accounts.length);
-
-    for (let i = 0; i < accounts.length; i++) {
-      const accountConfig = accounts[i];
-
-      const promise = processSingleAccount(
-        accountConfig,
-        i,
-        accounts.length,
-      ).then((res) => {
-        results[i] = res; // Store result
-        executing.delete(promise);
-      });
-
-      tasks.push(promise);
-      executing.add(promise);
-
-      if (executing.size >= concurrencyLimit) {
-        await Promise.race(executing);
-      }
-
-      // Optional: Add a small staggered startup delay (e.g., 2-5 seconds)
-      // to avoid triggering anti-bot by opening many browsers exactly at the same time
-      if (i < accounts.length - 1) {
-        const staggerDelay = 2000;
-        await new Promise((resolve) => setTimeout(resolve, staggerDelay));
-      }
-    }
-
-    await Promise.all(tasks);
-    console.log("\nAll accounts processing attempts finished!");
-
-    // Generate Excel report at the very end
-    generateExcelReport(accounts, results);
-  } catch (error) {
-    console.error("Fatal execution error:", error.message);
-    process.exit(1);
-  }
 }
 
 module.exports = {
   processSingleAccount,
-  generateExcelReport,
-  loadAccounts
+  HISTORY_FILE,
+  EXCEL_FILE,
 };
-
-if (require.main === module) {
-  main();
-}

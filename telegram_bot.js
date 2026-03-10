@@ -22,7 +22,7 @@ const mainMenu = {
     keyboard: [
       [{ text: "➕ Add Account" }, { text: "💳 Add Payment" }],
       [{ text: "🚀 Generate" }, { text: "📊 Status" }],
-      [{ text: "🧹 Reset" }],
+      [{ text: "📜 History" }, { text: "🧹 Reset" }],
     ],
     resize_keyboard: true,
   },
@@ -87,6 +87,43 @@ bot.onText(/\/reset|🧹 Reset/, (msg) => {
   bot.sendMessage(chatId, "All data has been cleared.", mainMenu);
 });
 
+bot.onText(/\/history|📜 History/, (msg) => {
+  const chatId = msg.chat.id;
+  const { HISTORY_FILE, EXCEL_FILE } = require("./index");
+
+  if (!fs.existsSync(HISTORY_FILE)) {
+    return bot.sendMessage(chatId, "No history found yet.", mainMenu);
+  }
+
+  try {
+    const history = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
+    if (history.length === 0) {
+      return bot.sendMessage(chatId, "History is empty.", mainMenu);
+    }
+
+    let summary = `📜 <b>Total Successful Accounts: ${history.length}</b>\n\n`;
+    const last5 = history.slice(-5); // Show last 5
+    last5.forEach((item, idx) => {
+      summary += `${idx + 1}. <code>${item.domainEmail}</code>\n`;
+    });
+
+    if (history.length > 5) {
+      summary += `\n<i>...and ${history.length - 5} others.</i>`;
+    }
+
+    bot.sendMessage(chatId, summary, { parse_mode: "HTML" });
+
+    // Send the Excel file too
+    if (fs.existsSync(EXCEL_FILE)) {
+      bot.sendDocument(chatId, EXCEL_FILE, {
+        caption: "Full Success Report (Excel)",
+      });
+    }
+  } catch (e) {
+    bot.sendMessage(chatId, "Error reading history.");
+  }
+});
+
 bot.onText(/\/generate|🚀 Generate/, async (msg) => {
   const chatId = msg.chat.id;
   const session = sessions[chatId];
@@ -107,16 +144,27 @@ bot.onText(/\/generate|🚀 Generate/, async (msg) => {
     `Starting automation for ${session.accounts.length} accounts...`,
   );
 
-  const maxPerPayment = config.maxAccountsPerPayment || 5;
+  const maxPerPayment = config.maxAccountsPerPayment || 3;
   const paired = [];
+  const paymentUsage = session.payments.map(() => 0);
 
+  // Round-robin distribution
   session.accounts.forEach((acc, index) => {
-    const pIndex = Math.floor(index / maxPerPayment);
-    if (pIndex < session.payments.length) {
-      paired.push({
-        microsoftAccount: acc,
-        payment: session.payments[pIndex],
-      });
+    // Cari payment yang tersedia (di bawah limit) mulai dari index % total_payment
+    let found = false;
+    let startIdx = index % session.payments.length;
+
+    for (let i = 0; i < session.payments.length; i++) {
+      const pIndex = (startIdx + i) % session.payments.length;
+      if (paymentUsage[pIndex] < maxPerPayment) {
+        paired.push({
+          microsoftAccount: acc,
+          payment: session.payments[pIndex],
+        });
+        paymentUsage[pIndex]++;
+        found = true;
+        break;
+      }
     }
   });
 
@@ -156,6 +204,12 @@ bot.onText(/\/generate|🚀 Generate/, async (msg) => {
             globalIndex,
             paired.length,
           );
+
+          // If domain email is missing, mark as FAILED
+          if (result.status === "SUCCESS" && !result.domainEmail) {
+            result.status = "FAILED";
+            result.log = "Confirmation page loaded but Domain Email not found.";
+          }
 
           let statusEmoji = result.status === "SUCCESS" ? "✅" : "❌";
 
@@ -206,11 +260,14 @@ bot.onText(/\/generate|🚀 Generate/, async (msg) => {
 
     // Wait for the entire batch to finish before moving to the next
     await Promise.all(batchPromises);
-    
+
     if (i + batchSize < paired.length) {
-        bot.sendMessage(chatId, `Batch finished. Waiting for next batch to start...`);
-        // Optional: Adding a small cool-down between batches
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+      bot.sendMessage(
+        chatId,
+        `Batch finished. Waiting for next batch to start...`,
+      );
+      // Optional: Adding a small cool-down between batches
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
 
@@ -222,7 +279,16 @@ bot.on("message", (msg) => {
   const text = msg.text;
 
   if (!text) return;
-  if (text.startsWith("/") || text.includes("Add Account") || text.includes("Add Payment") || text.includes("Generate") || text.includes("Status") || text.includes("Reset")) return;
+  if (
+    text.startsWith("/") ||
+    text.includes("Add Account") ||
+    text.includes("Add Payment") ||
+    text.includes("Generate") ||
+    text.includes("Status") ||
+    text.includes("History") ||
+    text.includes("Reset")
+  )
+    return;
 
   const session = sessions[chatId];
   if (!session || session.step === "IDLE") return;
