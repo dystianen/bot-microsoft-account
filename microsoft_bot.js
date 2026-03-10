@@ -61,7 +61,10 @@ class MicrosoftBot {
     this.browser = await Promise.race([
       chromium.connectOverCDP(this.wsUrl),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("CDP connection timeout after 30s")), 30000)
+        setTimeout(
+          () => reject(new Error("CDP connection timeout after 30s")),
+          30000,
+        ),
       ),
     ]);
 
@@ -440,24 +443,34 @@ class MicrosoftBot {
 
     // Extract domain email prefix from input field (e.g. PortlandDesignStudio156)
     try {
-      const domainInput = this.page.locator('input.ms-TextField-field[maxlength="27"]').first();
+      const domainInput = this.page
+        .locator('input.ms-TextField-field[maxlength="27"]')
+        .first();
       await domainInput.waitFor({ state: "visible", timeout: 15000 });
-      
+
       // Wait for suggestion to populate if it's empty
-      await this.page.waitForFunction(
-        (el) => el && el.value && el.value.length > 3,
-        await domainInput.elementHandle(),
-        { timeout: 15000 }
-      ).catch(() => {});
+      await this.page
+        .waitForFunction(
+          (el) => el && el.value && el.value.length > 3,
+          await domainInput.elementHandle(),
+          { timeout: 15000 },
+        )
+        .catch(() => {});
 
       const prefix = await domainInput.inputValue();
       if (prefix) {
         this.extractedDomainEmail = `${prefix}.onmicrosoft.com`;
-        this.extractedDomainPassword = this.accountConfig.microsoftAccount.password;
-        console.log(`[INFO] Extracted Domain Email: ${this.extractedDomainEmail}`);
+        this.extractedDomainPassword =
+          this.accountConfig.microsoftAccount.password;
+        console.log(
+          `[INFO] Extracted Domain Email: ${this.extractedDomainEmail}`,
+        );
       }
     } catch (e) {
-      console.log("[WARN] Could not extract domain prefix in fillPassword step:", e.message);
+      console.log(
+        "[WARN] Could not extract domain prefix in fillPassword step:",
+        e.message,
+      );
     }
 
     // Menggunakan regex untuk membedakan password utama dan retype password
@@ -473,7 +486,7 @@ class MicrosoftBot {
     await passwordLocator.waitFor({ state: "visible", timeout: 30000 });
 
     await this.randomMouseMove();
-    await passwordLocator.click({ force: true }).catch(() => { });
+    await passwordLocator.click({ force: true }).catch(() => {});
     await passwordLocator.pressSequentially(
       this.accountConfig.microsoftAccount.password,
       {
@@ -483,7 +496,7 @@ class MicrosoftBot {
 
     await this.humanDelay(100, 300);
 
-    await confirmPasswordLocator.click({ force: true }).catch(() => { });
+    await confirmPasswordLocator.click({ force: true }).catch(() => {});
     await confirmPasswordLocator.pressSequentially(
       this.accountConfig.microsoftAccount.password,
       {
@@ -568,7 +581,7 @@ class MicrosoftBot {
         console.log("No 'Stay signed in?' prompt detected in popup.");
       }
 
-      await popup.waitForLoadState("networkidle").catch(() => { });
+      await popup.waitForLoadState("networkidle").catch(() => {});
 
       console.log("Sign In popup handled successfully");
     } catch (e) {
@@ -730,7 +743,7 @@ class MicrosoftBot {
       await this.page
         .locator('button:has-text("Use this address")')
         .click()
-        .catch(() => { });
+        .catch(() => {});
       await this.humanDelay(1000, 2000);
     }
 
@@ -816,7 +829,7 @@ class MicrosoftBot {
         );
         await checkboxInput
           .waitFor({ state: "visible", timeout: 5000 })
-          .catch(() => { });
+          .catch(() => {});
 
         const isChecked = await checkboxInput.getAttribute("aria-checked");
 
@@ -842,7 +855,7 @@ class MicrosoftBot {
                 el.click();
                 el.dispatchEvent(new Event("change", { bubbles: true }));
               })
-              .catch(() => { });
+              .catch(() => {});
           }
           console.log("Checklist checkbox interaction finished");
         } else {
@@ -873,7 +886,10 @@ class MicrosoftBot {
       );
 
       return (
-        btn && !btn.disabled && btn.getAttribute("aria-disabled") !== "true"
+        btn &&
+        !btn.disabled &&
+        btn.getAttribute("aria-disabled") !== "true" &&
+        !btn.classList.contains("is-disabled")
       );
     });
 
@@ -883,7 +899,7 @@ class MicrosoftBot {
     console.log("Clicking Start Trial / Save...");
 
     try {
-      await saveBtn.click({ timeout: 8000, force: true });
+      await saveBtn.click({ force: true });
     } catch (e) {
       console.log("Normal click failed, using JS click...");
       await saveBtn.evaluate((el) => el.click());
@@ -891,17 +907,16 @@ class MicrosoftBot {
 
     console.log("Start Trial clicked");
 
-    await this.page.waitForLoadState("networkidle").catch(() => { });
+    await Promise.race([
+      this.page.waitForNavigation({ timeout: 30000 }),
+      this.page.waitForLoadState("networkidle"),
+    ]);
   }
 
   async clickPostTrialNextButton() {
     console.log("[STEP 15] Clicking final Next/Get Started button after Trial");
 
-    const nextBtn = this.page
-      .locator(
-        'button:has-text("Next"), button:has-text("Get Started"), button:has-text("Done"), .ms-Button--primary',
-      )
-      .first();
+    const nextBtn = this.getGenericButton("Next");
 
     await nextBtn.waitFor({ state: "visible", timeout: 60000 });
 
@@ -924,18 +939,21 @@ class MicrosoftBot {
 
     console.log("Next/Get Started clicked");
 
-    await this.page.waitForLoadState("networkidle").catch(() => { });
+    await this.waitForPage();
   }
 
   async extractDomainEmail() {
     console.log("[STEP 16] Finalizing account data...");
-    
+
     // Use pre-extracted data from fillPassword step
     if (this.extractedDomainEmail && this.extractedDomainPassword) {
-      console.log("[STEP 16] Using pre-extracted data:", this.extractedDomainEmail);
-      return { 
-        domainEmail: this.extractedDomainEmail, 
-        domainPassword: this.extractedDomainPassword 
+      console.log(
+        "[STEP 16] Using pre-extracted data:",
+        this.extractedDomainEmail,
+      );
+      return {
+        domainEmail: this.extractedDomainEmail,
+        domainPassword: this.extractedDomainPassword,
       };
     }
 
@@ -948,9 +966,9 @@ class MicrosoftBot {
 
     if (!found) {
       // Jika tidak ketemu di akhir but we have extracted earlier, still return whatever we had
-      return { 
-        domainEmail: this.extractedDomainEmail || "", 
-        domainPassword: this.extractedDomainPassword || "" 
+      return {
+        domainEmail: this.extractedDomainEmail || "",
+        domainPassword: this.extractedDomainPassword || "",
       };
     }
 
@@ -1003,7 +1021,9 @@ class MicrosoftBot {
         await new Promise((r) => setTimeout(r, 2000));
         if (done) break;
         if (await this.checkForError()) {
-          errorFound = new Error("MICROSOFT_ERROR_PAGE: Halaman error terdeteksi.");
+          errorFound = new Error(
+            "MICROSOFT_ERROR_PAGE: Halaman error terdeteksi.",
+          );
           done = true;
           return;
         }
@@ -1060,7 +1080,9 @@ class MicrosoftBot {
     this._currentStep = name;
     await fn();
     if (await this.checkForError()) {
-      throw new Error(`MICROSOFT_ERROR_PAGE: Terdeteksi setelah step "${name}"`);
+      throw new Error(
+        `MICROSOFT_ERROR_PAGE: Terdeteksi setelah step "${name}"`,
+      );
     }
     if (delay) await this.humanDelay(...delay);
   }
@@ -1068,18 +1090,62 @@ class MicrosoftBot {
   async run() {
     this._currentStep = "Initializing";
     try {
-      await this.runStep("Connecting to browser", () => this.connect(), [1000, 3000]);
-      await this.runStep("Opening Microsoft page", () => this.openMicrosoftPage(), [400, 800]);
-      await this.runStep("Building cart", () => this.clickBuildCartNextButton(), [300, 600]);
+      await this.runStep(
+        "Connecting to browser",
+        () => this.connect(),
+        [1000, 3000],
+      );
+      await this.runStep(
+        "Opening Microsoft page",
+        () => this.openMicrosoftPage(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Building cart",
+        () => this.clickBuildCartNextButton(),
+        [300, 600],
+      );
       await this.runStep("Filling email", () => this.fillEmail(), [1000, 2500]);
-      await this.runStep("Confirming email", () => this.clickCollectEmailNextButton(), [400, 800]);
-      await this.runStep("Setup account button", () => this.clickConfirmEmailSetupAccountButton(), [400, 800]);
-      await this.runStep("Filling basic info", () => this.fillBasicInfo(), [1500, 3500]);
-      await this.runStep("Confirming address (Stage 1)", () => this.clickUseThisAddressButton(), [300, 600]);
-      await this.runStep("Filling password", () => this.fillPassword(), [400, 800]);
-      await this.runStep("Handling sign in", () => this.handleOptionalSignIn(), [400, 800]);
-      await this.runStep("Going to payment page", () => this.goToPaymentPage(), [400, 800]);
-      await this.runStep("Filling payment details", () => this.fillPaymentDetails(), [400, 800]);
+      await this.runStep(
+        "Confirming email",
+        () => this.clickCollectEmailNextButton(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Setup account button",
+        () => this.clickConfirmEmailSetupAccountButton(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Filling basic info",
+        () => this.fillBasicInfo(),
+        [1500, 3500],
+      );
+      await this.runStep(
+        "Confirming address (Stage 1)",
+        () => this.clickUseThisAddressButton(),
+        [300, 600],
+      );
+      await this.runStep(
+        "Filling password",
+        () => this.fillPassword(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Handling sign in",
+        () => this.handleOptionalSignIn(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Going to payment page",
+        () => this.goToPaymentPage(),
+        [400, 800],
+      );
+      await this.runStep(
+        "Filling payment details",
+        () => this.fillPaymentDetails(),
+        [400, 800],
+      );
       await this.runStep("Saving payment", () => this.clickSavePaymentButton());
 
       // Stage 2 address + trial tidak perlu checkForError karena sudah ada internal check
@@ -1100,7 +1166,6 @@ class MicrosoftBot {
 
       console.log("Automation completed successfully");
       return { success: true, domainEmail, domainPassword };
-
     } catch (error) {
       const step = this._currentStep;
       console.error(`Automation error at step [${step}]:`, error);
