@@ -95,8 +95,10 @@ class AdsPowerHelper {
 
   async startBrowser(profileId) {
     try {
+      // Menambahkan parameter headless jika dikonfigurasi
+      const headlessParam = config.headless ? "&open_tabs=1&headless=1" : "";
       const response = await axios.get(
-        `${this.baseUrl}/api/v1/browser/start?user_id=${profileId}`,
+        `${this.baseUrl}/api/v1/browser/start?user_id=${profileId}${headlessParam}`,
         {
           headers: {
             Authorization: `Bearer ${config.adsPower.apiKey}`,
@@ -112,10 +114,16 @@ class AdsPowerHelper {
       }
 
       // AdsPower returns ws endpoint in data.ws.puppeteer or data.ws.selenium
-      // For Playwright connectOverCDP, we use the debugger address if available or ws
+      const wsData = response.data?.data?.ws || {};
+      const wsUrl = wsData.puppeteer || wsData.selenium;
+      
+      if (!wsUrl) {
+          throw new Error("Could not find WebSocket URL in AdsPower response");
+      }
+
       return {
-        wsUrl: response.data.data.ws.puppeteer,
-        debugPort: response.data.data.debug_port,
+        wsUrl: wsUrl,
+        debugPort: response.data?.data?.debug_port,
       };
     } catch (error) {
       console.error("Error starting browser:", error.message);

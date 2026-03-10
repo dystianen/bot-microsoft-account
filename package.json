@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon index.js",
+    "start:vps": "export HEADLESS=true && nodemon index.js",
     "bot": "nodemon telegram_bot.js",
+    "bot:vps": "export HEADLESS=true && nodemon telegram_bot.js",
     "generate": "node setup_neat_excel.js"
   },
   "keywords": [],
