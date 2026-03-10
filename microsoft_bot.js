@@ -438,6 +438,28 @@ class MicrosoftBot {
   async fillPassword() {
     console.log("[STEP 11] Filling password");
 
+    // Extract domain email prefix from input field (e.g. PortlandDesignStudio156)
+    try {
+      const domainInput = this.page.locator('input.ms-TextField-field[maxlength="27"]').first();
+      await domainInput.waitFor({ state: "visible", timeout: 15000 });
+      
+      // Wait for suggestion to populate if it's empty
+      await this.page.waitForFunction(
+        (el) => el && el.value && el.value.length > 3,
+        await domainInput.elementHandle(),
+        { timeout: 15000 }
+      ).catch(() => {});
+
+      const prefix = await domainInput.inputValue();
+      if (prefix) {
+        this.extractedDomainEmail = `${prefix}.onmicrosoft.com`;
+        this.extractedDomainPassword = this.accountConfig.microsoftAccount.password;
+        console.log(`[INFO] Extracted Domain Email: ${this.extractedDomainEmail}`);
+      }
+    } catch (e) {
+      console.log("[WARN] Could not extract domain prefix in fillPassword step:", e.message);
+    }
+
     // Menggunakan regex untuk membedakan password utama dan retype password
     const passwordLocator = this.page
       .locator(
@@ -729,9 +751,9 @@ class MicrosoftBot {
     const spinnerSelector =
       '[data-testid="spinner"], .css-100, .css-101, .ms-Spinner, [class*="spinner" i]';
 
-    // 1. Tunggu spinner hilang (max 30s)
+    // 1. Tunggu spinner hilang (max 90s)
     await this.page
-      .waitForSelector(spinnerSelector, { state: "detached", timeout: 30000 })
+      .waitForSelector(spinnerSelector, { state: "detached", timeout: 100000 })
       .catch(() => {
         console.log(
           "Spinner is taking too long or not found, attempting to proceed...",
@@ -906,33 +928,38 @@ class MicrosoftBot {
   }
 
   async extractDomainEmail() {
-    console.log("[STEP 16] Extracting domain email from confirmation page...");
+    console.log("[STEP 16] Finalizing account data...");
+    
+    // Use pre-extracted data from fillPassword step
+    if (this.extractedDomainEmail && this.extractedDomainPassword) {
+      console.log("[STEP 16] Using pre-extracted data:", this.extractedDomainEmail);
+      return { 
+        domainEmail: this.extractedDomainEmail, 
+        domainPassword: this.extractedDomainPassword 
+      };
+    }
 
-    await this.humanDelay(2000, 4000);
-
+    // Fallback if not found earlier (optional success page check)
     const emailLocator = this.page.locator("#displayName");
-
     const found = await emailLocator
-      .waitFor({ state: "visible", timeout: 30000 })
+      .waitFor({ state: "visible", timeout: 20000 })
       .then(() => true)
       .catch(() => false);
 
     if (!found) {
-      console.warn("[STEP 16] displayName not found");
-      return { domainEmail: "", domainPassword: "" };
+      // Jika tidak ketemu di akhir but we have extracted earlier, still return whatever we had
+      return { 
+        domainEmail: this.extractedDomainEmail || "", 
+        domainPassword: this.extractedDomainPassword || "" 
+      };
     }
 
     const rawText = (await emailLocator.textContent())?.trim() || "";
-
     const emailMatch = rawText.match(/[\w.+-]+@[\w.-]+\.onmicrosoft\.com/i);
     const domainEmail = emailMatch ? emailMatch[0] : rawText;
+    const domainPassword = this.accountConfig.microsoftAccount.password;
 
-    // ambil sebelum .onmicrosoft.com
-    const domainPassword = domainEmail.replace(/\.onmicrosoft\.com$/i, "");
-
-    console.log("[STEP 16] Domain email:", domainEmail);
-    console.log("[STEP 16] Extracted password:", domainPassword);
-
+    console.log("[STEP 16] Final Domain Email:", domainEmail);
     return { domainEmail, domainPassword };
   }
 
