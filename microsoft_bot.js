@@ -435,30 +435,21 @@ class MicrosoftBot {
   }
 
   async selectDropdownByText(selector, text) {
-    // Open dropdown
     const dropdown = this.page.locator(selector).first();
+
     await dropdown.waitFor({ state: "visible", timeout: 15000 });
     await this.randomMouseMove();
     await dropdown.click({ force: true });
 
-    await this.page.waitForSelector(".ms-Dropdown-items", {
-      state: "attached",
-      timeout: 10000,
-    });
+    // tunggu option muncul
+    await this.page.waitForSelector('[role="option"]', { timeout: 10000 });
 
-    // Pilih option by text (partial match supported for month/year formats)
-    await this.page.evaluate((textToSelect) => {
-      const options = document.querySelectorAll(
-        ".ms-Dropdown-items .ms-Dropdown-item",
-      );
-      const target = Array.from(options).find((o) => {
-        if (!o || !o.textContent) return false;
-        const itemText = o.textContent.trim().toLowerCase();
-        const search = (textToSelect || "").toString().toLowerCase();
-        return itemText === search || itemText.startsWith(search);
-      });
-      if (target) target.click();
-    }, text);
+    const option = this.page
+      .locator('[role="option"]')
+      .filter({ hasText: new RegExp(text, "i") })
+      .first();
+
+    await option.click();
   }
 
   async waitForManualSteps() {
