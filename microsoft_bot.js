@@ -619,52 +619,64 @@ class MicrosoftBot {
 
     console.log("[INFO] Waiting for payment response...");
 
+    // We use waitWithCheck to also monitor for global "Something happened" error pages
     const result = await Promise.race([
-      // error payment
+      // 1. Error message specifically from the payment form
       this.page
-        .waitForSelector('span[data-automation-id="error-message"]', {
-          timeout: 15000,
+        .waitForSelector('span[data-automation-id="error-message"], [class*="error" i]', {
+          state: "visible",
+          timeout: 45000,
         })
         .then(() => "error")
         .catch(() => null),
 
-      // address confirmation
+      // 2. Address confirmation popup
       this.page
         .waitForSelector('button:has-text("Use this address")', {
-          timeout: 15000,
+          state: "visible",
+          timeout: 45000,
         })
         .then(() => "address")
         .catch(() => null),
 
-      // url berubah
+      // 3. Success (navigation or billing text)
       this.page
-        .waitForFunction(() => window.location.href.includes("billing"), {
-          timeout: 15000,
+        .waitForFunction(() => 
+            window.location.href.includes("billing") || 
+            document.body.innerText.includes("Check your info"), 
+        {
+          timeout: 45000,
         })
         .then(() => "success")
         .catch(() => null),
-
-      // fallback delay
-      this.page.waitForTimeout(8000).then(() => "timeout"),
+        
+      // 4. Global Microsoft Error Page
+      new Promise(async (_, reject) => {
+          const timeout = 45000;
+          const start = Date.now();
+          while (Date.now() - start < timeout) {
+              if (await this.checkForError()) {
+                  return reject(new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat proses Save Payment."));
+              }
+              await new Promise(r => setTimeout(r, 2000));
+          }
+      }).catch(() => null)
     ]);
 
-    if (result === "error") {
-      const message = await this.page
-        .locator('span[data-automation-id="error-message"]')
-        .textContent();
+    console.log(`[DEBUG] Payment result detected: ${result}`);
 
+    if (result === "error") {
+      const errorLocator = this.page.locator('span[data-automation-id="error-message"], [class*="error" i]').filter({ state: 'visible' }).first();
+      const message = (await errorLocator.textContent())?.trim() || "Unknown payment error";
       throw new Error(`PAYMENT_DECLINED: ${message}`);
     }
 
     if (result === "address") {
       console.log("[INFO] Address confirmation detected");
-
-      const useAddressBtn = this.page.locator(
-        'button:has-text("Use this address")',
-      );
-
+      const useAddressBtn = this.page.locator('button:has-text("Use this address")');
       await this.randomMouseMove();
-      await useAddressBtn.click();
+      await useAddressBtn.click().catch(() => {});
+      await this.humanDelay(1000, 2000);
     }
 
     console.log("[INFO] Payment step finished");
