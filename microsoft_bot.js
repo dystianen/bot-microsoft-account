@@ -405,27 +405,33 @@ class MicrosoftBot {
   }
 
   async selectRandomDropdown(selector) {
+    // Open dropdown
     const dropdown = this.page.locator(selector).first();
-
     await dropdown.waitFor({ state: "visible", timeout: 15000 });
     await this.randomMouseMove();
     await dropdown.click({ force: true });
 
-    // tunggu options muncul
-    const options = this.page
-      .locator('[role="option"]')
-      .filter({ hasNot: this.page.locator(".is-disabled") });
+    // Tunggu options muncul
+    await this.page.waitForSelector(".ms-Dropdown-items", {
+      state: "attached",
+      timeout: 10000,
+    });
 
-    await options.first().waitFor({ timeout: 10000 });
+    // Pilih random option (skip index 0 karena biasanya placeholder)
+    await this.page.evaluate((sel) => {
+      const dropdown = document.querySelector(sel);
+      const options =
+        dropdown
+          .closest(".ms-Dropdown-container")
+          ?.querySelectorAll(".ms-Dropdown-item") ||
+        document.querySelectorAll(".ms-Dropdown-items .ms-Dropdown-item");
 
-    const count = await options.count();
-
-    if (count === 0) throw new Error("No dropdown options found");
-
-    // skip index 0 (biasanya placeholder)
-    const randomIndex = Math.floor(Math.random() * (count - 1)) + 1;
-
-    await options.nth(randomIndex).click();
+      const validOptions = Array.from(options).filter(
+        (o) => !o.classList.contains("is-disabled"),
+      );
+      const randomIndex = Math.floor(Math.random() * validOptions.length);
+      validOptions[randomIndex]?.click();
+    }, selector);
   }
 
   async selectDropdownByText(selector, text) {
@@ -435,15 +441,15 @@ class MicrosoftBot {
     await this.randomMouseMove();
     await dropdown.click({ force: true });
 
-    // tunggu option muncul
-    await this.page.waitForSelector('[role="option"]', { timeout: 10000 });
+    const listbox = this.page.locator('[role="listbox"]').last();
+    await listbox.waitFor();
 
-    const option = this.page
-      .locator('[role="option"]')
-      .filter({ hasText: new RegExp(text, "i") })
+    const option = listbox
+      .locator('[role="option"]', { hasText: new RegExp(text, "i") })
       .first();
 
-    await option.click();
+    await option.click({ trial: true }).catch(() => {});
+    await option.click({ force: true });
   }
 
   async waitForManualSteps() {
