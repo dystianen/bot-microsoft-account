@@ -128,10 +128,10 @@ class MicrosoftBot {
   async clickConfirmEmailSetupAccountButton() {
     console.log("[STEP 7] Clicking Setup Account button");
 
-    const nextBtn = this.getGenericButton("Next");
-    await this.waitWithCheck(nextBtn, 60000);
+    const setupBtn = this.getGenericButton("Setup");
+    await this.waitWithCheck(setupBtn, 60000);
     await this.randomMouseMove();
-    await nextBtn.click();
+    await setupBtn.click();
   }
 
   async fillBasicInfo() {
@@ -463,23 +463,26 @@ class MicrosoftBot {
     console.log("[STEP 11.5] Checking for optional Sign In prompt...");
 
     try {
-      // Tunggu page load dasar
       await this.page.waitForLoadState("domcontentloaded");
 
       const signInBtn = this.getGenericButton("Sign In");
 
-      // Retry hingga 3 kali untuk tombol Sign In
       let signInDetected = false;
       for (let attempt = 1; attempt <= 3; attempt++) {
+        // Check for error page before each attempt
+        if (await this.checkForError()) {
+            throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat pengecekan Sign In.");
+        }
+
         signInDetected = await signInBtn
-          .waitFor({ state: "visible", timeout: 15000 })
+          .waitFor({ state: "visible", timeout: 10000 })
           .then(() => true)
           .catch(() => false);
 
         if (signInDetected) break;
 
         console.log(`Sign In button not detected, retry ${attempt}...`);
-        await this.humanDelay(200, 500); // delay sebelum retry
+        await this.humanDelay(200, 500);
       }
 
       if (!signInDetected) {
@@ -488,31 +491,46 @@ class MicrosoftBot {
       }
 
       console.log("Sign In button detected, clicking...");
+
       await this.randomMouseMove();
-      await signInBtn.click();
-      await this.humanDelay(400, 800);
 
-      // Tangani "Stay signed in?" prompt jika muncul
-      const staySignedInBtn = this.page
-        .locator(
-          'button[id*="idSIButton" i], input[id*="idSIButton" i], button[type="submit"], input[type="submit"]',
-        )
-        .first();
+      // Handle popup window
+      const [popup] = await Promise.all([
+        this.page.waitForEvent("popup").catch(() => null),
+        signInBtn.click(),
+      ]);
 
-      const staySignedInVisible = await staySignedInBtn
-        .waitFor({ state: "visible", timeout: 10000 })
+      if (!popup) {
+        console.log("No popup detected after Sign In click.");
+        return;
+      }
+
+      console.log("Popup window detected");
+
+      await popup.waitForLoadState("domcontentloaded");
+
+      const yesBtn = popup.locator(
+        'button:has-text("Yes"), input[value="Yes"], #idSIButton9',
+      );
+
+      const yesVisible = await yesBtn
+        .waitFor({ state: "visible", timeout: 15000 })
         .then(() => true)
         .catch(() => false);
 
-      if (staySignedInVisible) {
-        console.log("Stay signed in prompt detected, clicking...");
+      if (yesVisible) {
+        console.log("Stay signed in prompt detected, clicking Yes...");
         await this.randomMouseMove();
-        await staySignedInBtn.click();
-        await this.humanDelay(200, 500);
+        await yesBtn.click();
       } else {
-        console.log("No 'Stay signed in?' prompt detected, proceeding...");
+        console.log("No 'Stay signed in?' prompt detected in popup.");
       }
+
+      await popup.waitForLoadState("networkidle").catch(() => {});
+
+      console.log("Sign In popup handled successfully");
     } catch (e) {
+      if (e.message.includes("MICROSOFT_ERROR_PAGE")) throw e;
       console.log("Optional Sign In handler skipped or errored:", e.message);
     }
   }
@@ -522,9 +540,13 @@ class MicrosoftBot {
 
     await this.page
       .locator("text=Add payment method")
-      .waitFor({ timeout: 100000 }).catch(async () => {
-         if (await this.checkForError()) throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat menunggu halaman pembayaran.");
-         throw new Error("Timeout waiting for payment page");
+      .waitFor({ timeout: 100000 })
+      .catch(async () => {
+        if (await this.checkForError())
+          throw new Error(
+            "MICROSOFT_ERROR_PAGE: Terdeteksi saat menunggu halaman pembayaran.",
+          );
+        throw new Error("Timeout waiting for payment page");
       });
 
     console.log("Payment page detected");
@@ -659,11 +681,7 @@ class MicrosoftBot {
 
       const checkboxInput = checkboxContainer.locator('input[type="checkbox"]');
 
-      const exists = (await checkboxInput.count()) > 0;
-
-      if (!exists) {
-        console.log("Checklist checkbox not found, skipping...");
-      } else {
+      if ((await checkboxInput.count()) > 0) {
         console.log("Checklist checkbox found");
 
         await checkboxInput.waitFor({ state: "visible", timeout: 10000 });
@@ -698,6 +716,8 @@ class MicrosoftBot {
         } else {
           console.log("Checkbox already checked");
         }
+      } else {
+        console.log("Checklist checkbox not found, skipping...");
       }
     } catch (e) {
       console.log("Checkbox handling skipped:", e.message);
@@ -705,85 +725,74 @@ class MicrosoftBot {
 
     await this.humanDelay(200, 500);
 
-    console.log("Waiting for Save/Start Trial button to become enabled...");
+    console.log("Finding Start Trial / Save button...");
 
-    // Target the specific disabled button and wait for it to become enabled
     const saveBtn = this.page
       .locator('button[class*="primary" i], button[data-bi-id*="save" i]')
       .filter({ hasText: /start trial|save/i })
       .first();
 
-    await saveBtn.waitFor({ state: "visible", timeout: 30000 });
+    await saveBtn.waitFor({ state: "visible", timeout: 60000 });
 
-    // Poll until aria-disabled is removed
-    await this.page.waitForFunction(
-      () => {
-        const btn = Array.from(document.querySelectorAll("button")).find((b) =>
-          /start trial|save/i.test(b.textContent),
-        );
-        return (
-          btn &&
-          !btn.disabled &&
-          btn.getAttribute("aria-disabled") !== "true" &&
-          !btn.classList.contains("is-disabled")
-        );
-      },
-      { timeout: 30000 },
-    );
-    // Wait for any potential spinner or overlay to disappear
-    console.log("Waiting for loading spinner to disappear...");
-    await this.page.waitForSelector('[data-testid="spinner"], .ms-Spinner, .css-100', { state: 'detached', timeout: 60000 }).catch(() => {
-      console.log("Spinner didn't appear or didn't disappear, attempting proceed...");
+    // tunggu tombol enabled saja
+    await this.page.waitForFunction(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) =>
+        /start trial|save/i.test(b.textContent),
+      );
+
+      return (
+        btn && !btn.disabled && btn.getAttribute("aria-disabled") !== "true"
+      );
     });
 
-    // Final check for button status and click
-    await this.page.waitForFunction(
-      () => {
-        const btn = Array.from(document.querySelectorAll("button")).find((b) =>
-          /start trial|save/i.test(b.textContent),
-        );
-        return (
-          btn &&
-          !btn.disabled &&
-          btn.getAttribute("aria-disabled") !== "true" &&
-          !btn.classList.contains("is-disabled")
-        );
-      },
-      { timeout: 30000 },
-    );
-
     await this.randomMouseMove();
-    await this.humanDelay(500, 1000);
+    await this.humanDelay(400, 900);
+
+    console.log("Clicking Start Trial / Save...");
 
     try {
-        // Try normal click first
-        await saveBtn.click({ timeout: 10000 });
+      await saveBtn.click({ timeout: 8000, force: true });
     } catch (e) {
-        console.log("Normal click failed or blocked, using injection click...");
-        // If normal click is blocked by spinner or detaches, use evaluate to click
-        await saveBtn.evaluate(el => el.click());
+      console.log("Normal click failed, using JS click...");
+      await saveBtn.evaluate((el) => el.click());
     }
-    
-    console.log("Save/Start Trial button clicked, waiting for next step...");
+
+    console.log("Start Trial clicked");
+
     await this.page.waitForLoadState("networkidle").catch(() => {});
   }
 
   async clickPostTrialNextButton() {
     console.log("[STEP 15] Clicking final Next/Get Started button after Trial");
 
-    // This button might have different text (Next, Get Started, Done)
-    const nextBtn = this.page.locator('button:has-text("Next"), button:has-text("Get Started"), button:has-text("Done"), .ms-Button--primary').filter({ state: 'visible' }).first();
-    
-    // Wait for the final button to appear
-    await nextBtn.waitFor({ state: "visible", timeout: 150000 });
-    await this.randomMouseMove();
-    await this.humanDelay(300, 600);
-    await nextBtn.click();
+    const nextBtn = this.page
+      .locator(
+        'button:has-text("Next"), button:has-text("Get Started"), button:has-text("Done"), .ms-Button--primary',
+      )
+      .first();
 
-    console.log(
-      "[STEP 15] Final button clicked, waiting for confirmation page...",
-    );
-    await this.waitForPage();
+    await nextBtn.waitFor({ state: "visible", timeout: 60000 });
+
+    await this.randomMouseMove();
+    await this.humanDelay(400, 900);
+
+    // remove spinner overlay
+    await this.page.evaluate(() => {
+      document
+        .querySelectorAll('[data-testid="spinner"], .css-100, .ms-Spinner')
+        .forEach((el) => el.remove());
+    });
+
+    try {
+      await nextBtn.click({ timeout: 5000, force: true });
+    } catch {
+      console.log("Playwright click blocked, fallback to JS click...");
+      await nextBtn.evaluate((el) => el.click());
+    }
+
+    console.log("Next/Get Started clicked");
+
+    await this.page.waitForLoadState("networkidle").catch(() => {});
   }
 
   async extractDomainEmail() {
@@ -822,15 +831,15 @@ class MicrosoftBot {
       // Periksa apakah teks error ini ada di element apapun di halaman
       const errorData = await this.page.evaluate(() => {
         const text = document.body.innerText;
-        const hasError = 
+        const hasError =
           text.includes("Something went wrong") ||
           text.includes("Something happened") ||
           text.includes("Error Code:") ||
           text.includes("715-123280");
-          
+
         return {
           hasError,
-          text: text.substring(0, 500) // Ambil sedikit cuplikan untuk log
+          text: text.substring(0, 500), // Ambil sedikit cuplikan untuk log
         };
       });
 
@@ -841,7 +850,7 @@ class MicrosoftBot {
     } catch (err) {
       // Jika page sudah tertutup atau crash, anggap saja tidak ada error yang bisa dicek
     }
-    
+
     return false;
   }
 
@@ -853,11 +862,15 @@ class MicrosoftBot {
         const start = Date.now();
         while (Date.now() - start < timeout) {
           if (await this.checkForError()) {
-            return reject(new Error("MICROSOFT_ERROR_PAGE: Halaman error Microsoft terdeteksi (Something happened)."));
+            return reject(
+              new Error(
+                "MICROSOFT_ERROR_PAGE: Halaman error Microsoft terdeteksi (Something happened).",
+              ),
+            );
           }
           await this.page.waitForTimeout(2000); // Cek setiap 2 detik
         }
-      })
+      }),
     ]);
   }
 
@@ -942,18 +955,22 @@ class MicrosoftBot {
 
       currentStep = "Handling manual sign in (if any)";
       await this.handleOptionalSignIn();
+      if (await this.checkForError()) throw new Error("MICROSOFT_ERROR_PAGE: Sign In page error");
       await this.humanDelay(400, 800);
 
       currentStep = "Going to payment page";
       await this.goToPaymentPage();
+      if (await this.checkForError()) throw new Error("MICROSOFT_ERROR_PAGE: Payment page navigation error");
       await this.humanDelay(400, 800);
 
       currentStep = "Filling VCC payment details";
       await this.fillPaymentDetails();
+      if (await this.checkForError()) throw new Error("MICROSOFT_ERROR_PAGE: Detail payment error");
       await this.humanDelay(400, 800);
 
       currentStep = "Saving payment";
       await this.clickSavePaymentButton();
+      if (await this.checkForError()) throw new Error("MICROSOFT_ERROR_PAGE: Save payment error");
 
       currentStep = "Confirming address (Stage 2)";
       await this.clickUseThisAddressButton();
