@@ -51,10 +51,8 @@ async function getUserConfig(telegram_id) {
       telegram_id: telegram_id.toString(),
       microsoftUrl: config.microsoftUrl,
       concurrencyLimit: config.concurrencyLimit,
-      maxAccountsPerPayment: config.maxAccountsPerPayment,
       proxyUsername: config.proxy.username,
       proxyPassword: config.proxy.password,
-      headless: config.headless,
     });
     await userConf.save();
   }
@@ -164,7 +162,6 @@ bot.onText(/⚙️ Config/, async (msg) => {
         [{ text: `Max Per VCC: ${userConf.maxAccountsPerPayment}`, callback_data: `set_max_vcc` }],
         [{ text: "Set Proxy Username", callback_data: "set_proxy_user" }],
         [{ text: "Set Proxy Password", callback_data: "set_proxy_pass" }],
-        [{ text: `Headless: ${userConf.headless ? "ON" : "OFF"}`, callback_data: "toggle_headless" }],
       ],
     },
   };
@@ -175,8 +172,7 @@ bot.onText(/⚙️ Config/, async (msg) => {
       `URL: <code>${userConf.microsoftUrl}</code>\n` +
       `Concurrency: ${userConf.concurrencyLimit}\n` +
       `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-      `Proxy User: <code>${userConf.proxyUsername}</code>\n` +
-      `Headless: <b>${userConf.headless}</b>`,
+      `Proxy User: <code>${userConf.proxyUsername}</code>`,
     { parse_mode: "HTML", ...options },
   );
 });
@@ -201,13 +197,6 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "set_proxy_pass") {
     sessions[chatId].step = "SET_PROXY_PASS";
     bot.sendMessage(chatId, "Please send the new Proxy Password.");
-  } else if (data === "toggle_headless") {
-    const userConf = await getUserConfig(chatId);
-    userConf.headless = !userConf.headless;
-    await userConf.save();
-    bot.sendMessage(chatId, `Headless mode is now ${userConf.headless ? "ON" : "OFF"}.`);
-    // Refresh config display
-    bot.editMessageText(`Updated Config...`, { chat_id: chatId, message_id: message.message_id });
   }
 });
 
@@ -272,7 +261,6 @@ bot.onText(/🚀 Generate/, async (msg) => {
             microsoftUrl: userConf.microsoftUrl,
             proxyUsername: userConf.proxyUsername,
             proxyPassword: userConf.proxyPassword,
-            headless: userConf.headless,
           };
 
           try {

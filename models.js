@@ -27,7 +27,6 @@ const UserConfigSchema = new mongoose.Schema({
   maxAccountsPerPayment: { type: Number, default: 3 },
   proxyUsername: { type: String, default: "" },
   proxyPassword: { type: String, default: "" },
-  headless: { type: Boolean, default: false },
   updatedAt: { type: Date, default: Date.now },
 });
 
