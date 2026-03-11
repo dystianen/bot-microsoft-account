@@ -933,6 +933,8 @@ class MicrosoftBot {
           "something went wrong",
           "error code",
           "terjadi sesuatu",
+          "Terjadi kesalahan",
+          "Melindungi akun Anda",
           "715-123280", // Kode blokir umum
           "incorrectly formatted postal code",
           "something happened",
