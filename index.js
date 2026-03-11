@@ -87,6 +87,12 @@ async function processSingleAccount(accountConfig, index, total) {
       log: err.message,
     };
   } finally {
+    // If automation failed or had an error, wait 5 seconds so the user can see it
+    if (executionResult && executionResult.status !== "SUCCESS") {
+      console.log(`[Account ${index + 1}] Automation failed/errored. Waiting 5s before cleanup...`);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+
     console.log(`[Account ${index + 1}] Starting cleanup...`);
 
     // 1. Close the browser instance through Playwright first

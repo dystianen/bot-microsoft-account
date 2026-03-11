@@ -1,4 +1,5 @@
 const TelegramBot = require("node-telegram-bot-api");
+const mongoose = require("mongoose");
 const config = require("./config");
 const { processSingleAccount } = require("./index");
 const fs = require("fs");
@@ -110,13 +111,14 @@ bot.onText(/➕ Add Account/, (msg) => {
   );
 });
 
-bot.onText(/💳 Add VCC/, (msg) => {
+bot.onText(/💳 Add VCC/, async (msg) => {
   const chatId = msg.chat.id;
   sessions[chatId] = sessions[chatId] || { accounts: [], step: "IDLE" };
   sessions[chatId].step = "WAIT_VCC";
+  const userConf = await getUserConfig(chatId);
   bot.sendMessage(
     chatId,
-    "Send VCC data in this format (one per line):\n\n`cardNumber|cvv|expMonth|expYear` (Default saldo: 3)",
+    `Send VCC data in this format (one per line):\n\n\`cardNumber|cvv|expMonth|expYear\` (Default saldo: ${userConf.maxAccountsPerPayment})`,
     { parse_mode: "Markdown" },
   );
 });
@@ -241,7 +243,8 @@ bot.onText(/🚀 Generate/, async (msg) => {
   session.running = true;
   sessions[chatId] = session;
 
-  bot.sendMessage(chatId, `🚀 Starting batch for ${session.accounts.length} accounts using ${vccs.length} VCCs...`);
+  console.log(`[Batch] Starting for user ${chatId}. Concurrency: ${userConf.concurrencyLimit}, Max per VCC: ${userConf.maxAccountsPerPayment}`);
+  bot.sendMessage(chatId, `🚀 Starting batch for ${session.accounts.length} accounts using ${vccs.length} VCCs (Concurrency: ${userConf.concurrencyLimit})...`);
 
   const batchSize = userConf.concurrencyLimit;
   let processedCount = 0;
@@ -360,7 +363,8 @@ bot.onText(/🚀 Generate/, async (msg) => {
       }
       await Promise.all(workers);
     } catch (err) {
-      console.error(err);
+      console.error("[Queue Error]", err);
+      await safeSendMessage(chatId, `⚠️ Queue stopped due to an internal error: ${escapeHTML(err.message)}`);
     } finally {
       session.running = false;
       bot.sendMessage(chatId, "🏁 Finished processing session accounts.", mainMenu);
@@ -411,6 +415,8 @@ bot.on("message", async (msg) => {
   } else if (session.step === "WAIT_VCC") {
     const lines = text.split("\n");
     let added = 0;
+    const userConf = await getUserConfig(chatId);
+    
     for (const line of lines) {
       const parts = line.split("|").map((s) => s.trim());
       if (parts.length >= 4) {
@@ -421,6 +427,7 @@ bot.on("message", async (msg) => {
             cvv: parts[1],
             expMonth: parts[2],
             expYear: parts[3],
+            saldo: userConf.maxAccountsPerPayment, // Use database config
             telegram_id: chatId.toString(),
           });
           await vcc.save();
