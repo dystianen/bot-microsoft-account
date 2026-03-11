@@ -811,6 +811,89 @@ class MicrosoftBot {
     console.log("[INFO] Payment step finished");
   }
 
+  async clickStartTrialButton() {
+    console.log("[STEP 14] Clicking Start Trial button");
+
+    const possibleNames = [
+      "Start trial",
+      "Mulai uji coba",
+      "Try now",
+      "Coba sekarang",
+      "Start",
+    ];
+
+    const spinnerSelector =
+      '[data-testid="spinner"], .css-100, .css-101, .ms-Spinner, [class*="spinner" i]';
+
+    // 1️⃣ Tunggu loading selesai
+    console.log("[INFO] Waiting spinner to disappear...");
+    await this.page
+      .waitForSelector(spinnerSelector, { state: "detached", timeout: 90000 })
+      .catch(() => {
+        console.log("Spinner not found or still running, continuing...");
+      });
+
+    await this.humanDelay(800, 1500);
+
+    // 2️⃣ Handle checkbox jika ada
+    console.log("[INFO] Checking for agreement checkbox...");
+
+    try {
+      const checkbox = this.page.locator('input[type="checkbox"]').first();
+
+      if (await checkbox.count()) {
+        const checked =
+          (await checkbox.getAttribute("aria-checked")) === "true" ||
+          (await checkbox.isChecked());
+
+        if (!checked) {
+          console.log("[INFO] Checkbox found, clicking...");
+          await this.randomMouseMove();
+          await checkbox.click({ force: true });
+          await this.humanDelay(300, 700);
+        } else {
+          console.log("[INFO] Checkbox already checked");
+        }
+      } else {
+        console.log("[INFO] Checkbox not found, skipping...");
+      }
+    } catch (e) {
+      console.log("[INFO] Checkbox handling skipped:", e.message);
+    }
+
+    // 3️⃣ Tunggu tombol enable
+    console.log("[INFO] Waiting Start Trial button enabled...");
+
+    await this.page
+      .waitForFunction(
+        () => {
+          const btn = [...document.querySelectorAll("button")].find((b) =>
+            /start trial|try now|coba sekarang|mulai/i.test(b.textContent),
+          );
+
+          return (
+            btn &&
+            !btn.disabled &&
+            btn.getAttribute("aria-disabled") !== "true" &&
+            !btn.classList.contains("is-disabled")
+          );
+        },
+        { timeout: 60000 },
+      )
+      .catch(() => {});
+
+    // 4️⃣ Click button
+    await this.clickButtonWithPossibleNames(possibleNames);
+
+    console.log("[INFO] Start Trial clicked");
+
+    // 5️⃣ Tunggu page change
+    await Promise.race([
+      this.page.waitForNavigation({ timeout: 30000 }).catch(() => {}),
+      this.page.waitForLoadState("networkidle").catch(() => {}),
+    ]);
+  }
+
   async clickPostTrialNextButton() {
     console.log("[STEP 15] Clicking final Next/Get Started button after Trial");
 
@@ -822,26 +905,20 @@ class MicrosoftBot {
       "Mulai",
     ];
 
+    // remove spinner overlay
     await this.page.evaluate(() => {
       document
         .querySelectorAll('[data-testid="spinner"], .css-100, .ms-Spinner')
         .forEach((el) => el.remove());
     });
 
-    await this.clickButtonWithPossibleNames(possibleNames);
-    await this.waitForPage();
-  }
+    await this.humanDelay(300, 700);
 
-  async clickStartTrialButton() {
-    console.log("[STEP 14] Clicking Start Trial button");
-    const possibleNames = [
-      "Start trial",
-      "Mulai uji coba",
-      "Try now",
-      "Coba sekarang",
-      "Start",
-    ];
     await this.clickButtonWithPossibleNames(possibleNames);
+
+    console.log("[INFO] Next/Get Started clicked");
+
+    await this.waitForPage();
   }
 
   async extractDomainEmail() {
