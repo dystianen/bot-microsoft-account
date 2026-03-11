@@ -40,23 +40,7 @@ npm install
 Start the application:
 
 ```bash
-npm start
-```
-
-or if your project uses a custom script:
-
-```bash
-npm run start
-```
-or if you want to run bot telegram:
-
-```bash
 npm run bot
-```
-or if you want to run bot telegram in headless mode:
-
-```bash
-npm run bot:vps
 ```
 
 ### Notes
