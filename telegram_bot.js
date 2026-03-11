@@ -247,6 +247,8 @@ bot.onText(/🚀 Generate/, async (msg) => {
   let processedCount = 0;
 
   const runQueue = async () => {
+    const activeVccIds = new Set(); // Track VCCs currently in use by workers
+
     try {
       const workers = [];
       const worker = async () => {
@@ -254,14 +256,42 @@ bot.onText(/🚀 Generate/, async (msg) => {
           const accountData = session.accounts.shift();
           if (!accountData) break;
 
-          // Find a VCC with saldo > 0
-          const vcc = await VCC.findOne({ telegram_id: chatId.toString(), saldo: { $gt: 0 }, status: "active" });
+          // Find a VCC with saldo > 0 that is NOT currently in use by another worker
+          let vcc = null;
+          let retryCount = 0;
+          
+          while (!vcc && retryCount < 5) { // Retry for ~50 seconds if VCCs are busy
+            vcc = await VCC.findOne({ 
+              telegram_id: chatId.toString(), 
+              saldo: { $gt: 0 }, 
+              status: "active",
+              _id: { $nin: Array.from(activeVccIds).map(id => new mongoose.Types.ObjectId(id)) }
+            });
+
+            if (!vcc) {
+              // Check if any active VCCs exist at all (even if busy)
+              const totalActive = await VCC.countDocuments({ telegram_id: chatId.toString(), saldo: { $gt: 0 }, status: "active" });
+              if (totalActive === 0) {
+                session.accounts.unshift(accountData); // Put back
+                await safeSendMessage(chatId, "❌ No more active VCCs with balance found.");
+                return; // End this worker
+              }
+              
+              // If VCCs exist but are busy, wait and retry
+              console.log(`[Worker] All VCCs are busy, waiting 10s... (Attempt ${retryCount + 1})`);
+              await new Promise(r => setTimeout(r, 10000));
+              retryCount++;
+            }
+          }
 
           if (!vcc) {
-            session.accounts.unshift(accountData); // Put back
-            await safeSendMessage(chatId, "❌ No more active VCCs with balance found.");
+            session.accounts.unshift(accountData);
+            await safeSendMessage(chatId, "⚠️ Timeout waiting for an available VCC. Returning account to queue.");
             break;
           }
+
+          // Lock this VCC
+          activeVccIds.add(vcc._id.toString());
 
           processedCount++;
           const currentIdx = processedCount;
@@ -317,6 +347,9 @@ bot.onText(/🚀 Generate/, async (msg) => {
             }
           } catch (err) {
             await safeSendMessage(chatId, `❌ Error: ${escapeHTML(err.message)}`);
+          } finally {
+            // Unlock VCC so it can be used by other workers
+            if (vcc) activeVccIds.delete(vcc._id.toString());
           }
         }
       };
