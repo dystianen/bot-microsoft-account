@@ -35,24 +35,34 @@ class MicrosoftBot {
 
   async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
     let isDone = false;
+    let errorMsg = null;
+
     const checkLoop = async () => {
-      // Loop terus sampai isDone = true (promise selesai) atau terdeteksi error.
-      // Kita tidak beri timeout internal di sini karena biarlah 'promise' yang pegang timeout-nya sendiri.
       while (!isDone) {
         await this.page.waitForTimeout(2000).catch(() => { isDone = true; });
         if (isDone) break;
-        if (await this.checkForError()) {
-          throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi selama penantian.");
+
+        const detectedError = await this.checkForError();
+        if (detectedError) {
+          errorMsg = detectedError;
+          isDone = true;
+          break;
         }
       }
     };
 
-    return await Promise.race([
+    const result = await Promise.race([
       promise,
       checkLoop(),
     ]).finally(() => {
       isDone = true;
     });
+
+    if (errorMsg) {
+      throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
+    }
+
+    return result;
   }
 
   async waitForSpinnerGone(extraDelay = 0) {
@@ -66,17 +76,16 @@ class MicrosoftBot {
           spinner.waitFor({ state: "hidden", timeout: HARD_TIMEOUT })
         );
       } catch (e) {
-        if (e.message.includes("MICROSOFT_ERROR_PAGE")) throw e;
+        if (e.message.includes("MICROSOFT_ERROR")) throw e;
         console.log("[WAIT] Spinner still visible or check failed, continuing...");
       }
       console.log("[WAIT] Spinner gone.");
     }
 
-    await this.checkForError().then(hasError => {
-      if (hasError) throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi setelah spinner.");
-    }).catch(e => {
-      if (e.message.includes("MICROSOFT_ERROR_PAGE")) throw e;
-    });
+    const postSpinnerError = await this.checkForError();
+    if (postSpinnerError) {
+      throw new Error(`MICROSOFT_ERROR: ${postSpinnerError} (Detected after spinner)`);
+    }
 
     if (extraDelay > 0) {
       await this.humanDelay(extraDelay, extraDelay + 300);
@@ -601,28 +610,17 @@ class MicrosoftBot {
     console.log("[STEP 11.5] Checking for optional Sign In prompt...");
 
     try {
-      await this.page.waitForLoadState("domcontentloaded");
       await this.waitForSpinnerGone();
 
-      const signInBtn = this.getGenericButton("Sign In");
-      let signInDetected = false;
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        if (await this.checkForError()) {
-          throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat pengecekan Sign In.");
-        }
-
-        signInDetected = await signInBtn
-          .waitFor({ state: "visible", timeout: 5000 })
-          .then(() => true)
-          .catch(() => false);
-
-        if (signInDetected) break;
-        console.log(`Sign In not detected, retry ${attempt}...`);
-        await this.humanDelay(200, 500);
+      if (await this.checkForError()) {
+        throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat pengecekan Sign In.");
       }
 
-      if (!signInDetected) {
+      const signInBtn = this.getGenericButton("Sign In");
+
+      const visible = await signInBtn.isVisible().catch(() => false);
+
+      if (!visible) {
         console.log("No Sign In button detected, skipping...");
         return;
       }
@@ -641,13 +639,12 @@ class MicrosoftBot {
       }
 
       await popup.waitForLoadState("domcontentloaded");
+
       const yesBtn = popup.locator(
-        'button:has-text("Yes"), input[value="Yes"], #idSIButton9',
+        'button:has-text("Yes"), input[value="Yes"], #idSIButton9'
       );
-      const yesVisible = await yesBtn
-        .waitFor({ state: "visible", timeout: 15000 })
-        .then(() => true)
-        .catch(() => false);
+
+      const yesVisible = await yesBtn.isVisible().catch(() => false);
 
       if (yesVisible) {
         await yesBtn.click();
@@ -656,6 +653,7 @@ class MicrosoftBot {
 
       await popup.waitForLoadState("networkidle").catch(() => { });
       console.log("Sign In popup handled successfully");
+
     } catch (e) {
       if (e.message.includes("MICROSOFT_ERROR_PAGE")) throw e;
       console.log("Optional Sign In handler skipped:", e.message);
@@ -945,46 +943,59 @@ class MicrosoftBot {
 
   async checkForError() {
     try {
-      // 1. Cek pesan error validasi di field (biasanya cepat)
+      // 1. Cek pesan error validasi di field (biasanya merah di bawah input)
       const fieldError = this.page.locator('[data-automation-id="error-message"]').first();
       if (await fieldError.isVisible().catch(() => false)) {
         const msg = (await fieldError.textContent().catch(() => "")).trim();
-        console.log(`[ERROR] Field validation error detected: ${msg}`);
-        return true;
+        return `Field Validation Error: ${msg}`;
       }
 
       // 2. Cek teks body untuk indikasi error Microsoft (Optimized evaluate)
-      const hasMajorError = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
+      const detailedError = await this.page.evaluate(() => {
+        const text = document.body.innerText;
+        const lowerText = text.toLowerCase();
+
+        // List marker error yang sering muncul
         const markers = [
           "something went wrong",
           "error code",
           "terjadi sesuatu",
-          "715-123280",
+          "715-123280", // Kode blokir umum
           "incorrectly formatted postal code",
-          "something happened"
+          "something happened",
+          "we are sorry, but we could not complete this",
+          "try a different way"
         ];
-        
-        // Cek marker utama
-        const found = markers.some(m => text.includes(m));
-        if (!found) return false;
 
-        // Pengecualian protektif
-        if (text.includes("something happened") && text.includes("something happened to be")) {
-           return false;
+        const foundMarker = markers.find(m => lowerText.includes(m));
+        if (!foundMarker) return null;
+
+        // Pengecualian protektif agar tidak false positive
+        if (lowerText.includes("something happened") && lowerText.includes("something happened to be")) {
+          return null;
         }
 
-        return true;
-      }).catch(() => false);
+        // Coba cari elemen yang mengandung teks error untuk ambil context lebih banyak
+        // Jika ada element dengan class atau ID 'error', 'errorMessage', dsb.
+        const errorContainer = document.querySelector('[role="alert"], [class*="error" i], [id*="error" i]');
+        if (errorContainer && errorContainer.innerText.length > 5) {
+          return errorContainer.innerText.trim();
+        }
 
-      if (hasMajorError) {
-        console.log("[ERROR] Microsoft error page detected.");
-        return true;
+        // Fallback: Ambil potongan teks di sekitar marker atau baris yang mengandung marker
+        const lines = text.split('\n');
+        const errorLine = lines.find(l => l.toLowerCase().includes(foundMarker));
+        return errorLine ? errorLine.trim() : `Indicator detected: ${foundMarker}`;
+      }).catch(() => null);
+
+      if (detailedError) {
+        console.log(`[ERROR] Microsoft error detected: ${detailedError}`);
+        return detailedError;
       }
     } catch (err) {
       // Ignore silence check errors
     }
-    return false;
+    return null;
   }
 
   async waitWithCheck(locator, timeout = HARD_TIMEOUT) {
@@ -1017,8 +1028,9 @@ class MicrosoftBot {
     console.log(`[STEP] ${name}`);
     this._currentStep = name;
     await fn();
-    if (await this.checkForError()) {
-      throw new Error(`MICROSOFT_ERROR_PAGE: Terdeteksi setelah step "${name}"`);
+    const stepError = await this.checkForError();
+    if (stepError) {
+      throw new Error(`MICROSOFT_ERROR: ${stepError} (Detected after step "${name}")`);
     }
     if (delay) await this.humanDelay(...delay);
   }

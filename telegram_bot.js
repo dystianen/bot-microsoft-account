@@ -12,6 +12,36 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
+// Sequential message queue for Telegram to avoid rate limits and collisions
+let _msgQueue = Promise.resolve();
+async function safeSendMessage(chatId, text, options = {}) {
+  _msgQueue = _msgQueue.then(async () => {
+    try {
+      await bot.sendMessage(chatId, text, options);
+    } catch (err) {
+      console.error("[Telegram] Error sending message:", err.message);
+      // Fallback: send without options (e.g. if HTML is broken)
+      try {
+        await bot.sendMessage(chatId, text.replace(/<[^>]*>?/gm, "")); 
+      } catch (inner) {
+        console.error("[Telegram] Final fallback failed:", inner.message);
+      }
+    }
+    // Small delay between messages
+    await new Promise(r => setTimeout(r, 500));
+  });
+  return _msgQueue;
+}
+
+function escapeHTML(str) {
+  if (!str) return "";
+  return str
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 // Memory storage for user data
 const sessions = {};
 
@@ -221,9 +251,9 @@ bot.onText(/\/generate|🚀 Generate/, async (msg) => {
           processedCount++;
           const currentCount = processedCount;
 
-          bot.sendMessage(
+          await safeSendMessage(
             chatId,
-            `⏳ [${currentCount}] Starting: ${account.email}...`,
+            `⏳ [${currentCount}] Starting: ${escapeHTML(account.email)}...`,
           );
 
           try {
@@ -236,27 +266,24 @@ bot.onText(/\/generate|🚀 Generate/, async (msg) => {
             }
 
             let statusEmoji = result.status === "SUCCESS" ? "✅" : "❌";
-            const safeLog = (result.log || "Unknown error")
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .substring(0, 500);
+            const safeLog = escapeHTML((result.log || "Unknown error").substring(0, 500));
+            const safeEmail = escapeHTML(account.email);
+            const safeDomain = escapeHTML(result.domainEmail);
+            const safePass = escapeHTML(result.domainPassword);
 
-            let message = `${statusEmoji} <b>Result [${currentCount}] for ${account.email}</b>\n`;
+            let message = `${statusEmoji} <b>Result [${currentCount}] for ${safeEmail}</b>\n`;
             message += `<b>Status:</b> ${result.status}\n`;
 
             if (result.status === "SUCCESS") {
-              message += `<b>Domain:</b> <code>${result.domainEmail}</code>\n`;
-              message += `<b>Pass:</b> <code>${result.domainPassword}</code>\n`;
+              message += `<b>Domain:</b> <code>${safeDomain}</code>\n`;
+              message += `<b>Pass:</b> <code>${safePass}</code>\n`;
             } else {
               message += `<b>Log:</b> ${safeLog}\n`;
             }
 
-            await bot.sendMessage(chatId, message, { parse_mode: "HTML" }).catch(() => {
-                bot.sendMessage(chatId, `${statusEmoji} Result [${currentCount}] for ${account.email}: ${result.status}`);
-            });
+            await safeSendMessage(chatId, message, { parse_mode: "HTML" });
           } catch (err) {
-            bot.sendMessage(chatId, `❌ Worker Error for ${account.email}: ${err.message}`);
+            await safeSendMessage(chatId, `❌ Worker Error for ${escapeHTML(account.email)}: ${escapeHTML(err.message)}`);
           }
           
           // Optional stagger delay before a worker picks up the next task
