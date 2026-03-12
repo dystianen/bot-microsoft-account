@@ -9,12 +9,13 @@ const SPINNER_SELECTOR =
 const HARD_TIMEOUT = 1.5 * 60 * 1000; // 1 menit 30 detik
 
 class MicrosoftBot {
-  constructor(wsUrl, accountConfig) {
+  constructor(wsUrl, accountConfig, onPaymentSaved) {
     this.wsUrl = wsUrl;
     this.browser = null;
     this.context = null;
     this.page = null;
     this.accountConfig = accountConfig;
+    this.onPaymentSaved = onPaymentSaved;
   }
 
   // ─── Core helpers ────────────────────────────────────────────────────────────
@@ -543,32 +544,46 @@ class MicrosoftBot {
 
     await this.waitForSpinnerGone();
 
+    await this.waitForSpinnerGone();
     try {
-      const domainInput = this.page
-        .locator('input.ms-TextField-field[maxlength="27"]')
-        .first();
-      await this.runWithMonitor(
-        domainInput.waitFor({ state: "visible", timeout: HARD_TIMEOUT }),
-      );
-      await this.page
-        .waitForFunction(
-          (el) => el && el.value && el.value.length > 3,
-          await domainInput.elementHandle(),
-          { timeout: 15000 },
-        )
-        .catch(() => {});
+      const inputs = this.page.locator("input.ms-TextField-field");
+      const count = await inputs.count();
+      let username = "";
+      let prefix = "";
 
-      const prefix = await domainInput.inputValue();
-      if (prefix) {
-        this.extractedDomainEmail = `${prefix}.onmicrosoft.com`;
+      for (let i = 0; i < count; i++) {
+        const input = inputs.nth(i);
+        const id = await input.getAttribute("id").catch(() => "");
+        const placeholder = await input
+          .getAttribute("placeholder")
+          .catch(() => "");
+        const val = await input.inputValue();
+
+        if (id?.includes("username") || placeholder?.includes("username")) {
+          username = val;
+        } else if (await input.getAttribute("maxlength") === "27") {
+          prefix = val;
+        }
+      }
+
+      // Fallback if ID/placeholder check fails
+      if (!username && count >= 2) {
+        username = await inputs.nth(0).inputValue();
+        prefix = await inputs.nth(1).inputValue();
+      }
+
+      if (username && prefix) {
+        this.extractedDomainEmail = `${username}@${prefix}.onmicrosoft.com`;
         this.extractedDomainPassword =
           this.accountConfig.microsoftAccount.password;
         console.log(
           `[INFO] Extracted Domain Email: ${this.extractedDomainEmail}`,
         );
+      } else if (prefix) {
+        this.extractedDomainEmail = `${prefix}.onmicrosoft.com`;
       }
     } catch (e) {
-      console.log("[WARN] Could not extract domain prefix:", e.message);
+      console.log("[WARN] Could not extract domain info:", e.message);
     }
 
     const passwordLocator = this.page
@@ -833,6 +848,15 @@ class MicrosoftBot {
 
     resolved = true;
     console.log(`[DEBUG] Payment result: ${result}`);
+
+    if (result === "success") {
+      console.log("[INFO] Payment successfully saved.");
+      if (typeof this.onPaymentSaved === "function") {
+        await this.onPaymentSaved().catch((e) =>
+          console.error("[CALLBACK ERROR]", e.message),
+        );
+      }
+    }
 
     if (result === "error") {
       const msg = await this.page

@@ -24,7 +24,7 @@ async function saveToDB(result, telegram_id) {
 
 // File-based history removed in favor of MongoDB
 
-async function processSingleAccount(accountConfig, index, total) {
+async function processSingleAccount(accountConfig, index, total, onPaymentSaved) {
   const profileName = `MS-Account-${Date.now()}-${index}`;
 
   console.log(
@@ -54,7 +54,7 @@ async function processSingleAccount(accountConfig, index, total) {
     console.log(`[Account ${index + 1}] Browser started. WS URL: ${wsUrl}`);
 
     // 3. Run Microsoft automation
-    bot = new MicrosoftBot(wsUrl, accountConfig);
+    bot = new MicrosoftBot(wsUrl, accountConfig, onPaymentSaved);
     result = await bot.run();
 
     if (result && result.success) {

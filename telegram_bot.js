@@ -282,6 +282,9 @@ bot.onText(/🚀 Generate/, async (msg) => {
               
               // If VCCs exist but are busy, wait and retry
               console.log(`[Worker] All VCCs are busy, waiting 10s... (Attempt ${retryCount + 1})`);
+              if (retryCount === 0) {
+                await safeSendMessage(chatId, `⚠️ Worker is waiting for an available VCC (concurrency limit vs available VCCs)...`);
+              }
               await new Promise(r => setTimeout(r, 10000));
               retryCount++;
             }
@@ -316,27 +319,35 @@ bot.onText(/🚀 Generate/, async (msg) => {
           };
 
           try {
-            const result = await processSingleAccount(pairedData, currentIdx - 1, processedCount + session.accounts.length);
-
-            if (result.status === "SUCCESS") {
-              // Use atomic update to avoid race conditions and ensure balance decreases
+            const onPaymentSaved = async () => {
               const updatedVcc = await VCC.findByIdAndUpdate(
                 vcc._id,
                 { $inc: { saldo: -1 } },
-                { new: true }
+                { new: true },
               );
-              
-              console.log(`[DB] VCC ${vcc.cardNumber.slice(-4)} balance decreased: ${vcc.saldo} -> ${updatedVcc.saldo}`);
-
+              console.log(
+                `[DB] VCC ${vcc.cardNumber.slice(-4)} balance decreased (Payment Saved): ${vcc.saldo} -> ${updatedVcc.saldo}`,
+              );
               if (updatedVcc.saldo <= 0) {
                 updatedVcc.status = "empty";
                 await updatedVcc.save();
                 console.log(`[DB] VCC ${vcc.cardNumber.slice(-4)} is now empty.`);
               }
+              // Update local vcc object for final success message
+              vcc.saldo = updatedVcc.saldo;
+            };
 
+            const result = await processSingleAccount(
+              pairedData,
+              currentIdx - 1,
+              processedCount + session.accounts.length,
+              onPaymentSaved,
+            );
+
+            if (result.status === "SUCCESS") {
               let message = `✅ <b>Success [${currentIdx}] for ${escapeHTML(accountData.email)}</b>\n`;
               message += `Domain: <code>${escapeHTML(result.domainEmail)}</code>\n`;
-              message += `VCC Balance: ${updatedVcc.saldo}`;
+              message += `VCC Balance: ${vcc.saldo}`;
               await safeSendMessage(chatId, message, { parse_mode: "HTML" });
             } else {
               let message = `❌ <b>Failed [${currentIdx}] for ${escapeHTML(accountData.email)}</b>\n`;
@@ -359,7 +370,10 @@ bot.onText(/🚀 Generate/, async (msg) => {
 
       for (let i = 0; i < batchSize; i++) {
         workers.push(worker());
-        if (i < batchSize - 1) await new Promise((r) => setTimeout(r, 5000));
+        if (i < batchSize - 1) {
+          console.log(`[Queue] Waiting 60s before starting next worker...`);
+          await new Promise((r) => setTimeout(r, 60000));
+        }
       }
       await Promise.all(workers);
     } catch (err) {
