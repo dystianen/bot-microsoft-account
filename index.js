@@ -49,16 +49,15 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
     console.log(`[Account ${index + 1}] Browser started. WS URL: ${wsUrl}`);
 
     // 3. Run Microsoft automation
-    bot = new MicrosoftBot(wsUrl, accountConfig);
+    bot = new MicrosoftBot(wsUrl, accountConfig, onPaymentSaved);
     result = await bot.run();
 
     if (result && result.success) {
       console.log(
         `[Account ${index + 1}] Automation finished successfully. Domain: ${result.domainEmail} Password: ${accountConfig.microsoftAccount.password}`,
       );
-      if (onPaymentSaved) {
-        await onPaymentSaved();
-      }
+      // onPaymentSaved is now handled by MicrosoftBot immediately after payment is saved 
+      // instead of waiting until the end of the run.
       executionResult = {
         status: "SUCCESS",
         domainEmail: result.domainEmail,

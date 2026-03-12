@@ -3,6 +3,7 @@ const config = require("./config");
 const { processSingleAccount } = require("./index");
 const connectDB = require("./db");
 const { SuccessAccount, VCC, UserConfig } = require("./models");
+const date = require('date-and-time')
 
 // Wrap in an async function to allow awaiting connection
 async function startBot() {
@@ -160,7 +161,8 @@ function initializeBotHandlers(bot) {
 
     let summary = `📜 <b>Last 100 Success Accounts:</b>\n\n`;
     history.forEach((item, idx) => {
-      summary += `${idx + 1}. <code>${item.domainEmail}</code> | <code>${item.domainPassword}</code>\n`;
+      const dateStr = item.createdAt ? date.format(item.createdAt, 'DD MMM YYYY HH:mm', true) : "N/A";
+      summary += `${idx + 1}. [${dateStr}] <code>${item.domainEmail}</code> | <code>${item.domainPassword}</code>\n`;
     });
 
     bot.sendMessage(chatId, summary, { parse_mode: "HTML" });
@@ -307,6 +309,7 @@ function initializeBotHandlers(bot) {
 
           if (result.status === "SUCCESS") {
             let message = `✅ <b>Success [${currentIdx}]</b>\n`;
+            message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
             message += `Email: <code>${escapeHTML(accountData.email)}</code>\n`;
             message += `Domain: <code>${escapeHTML(result.domainEmail)}</code>\n`;
             message += `Password: <code>${escapeHTML(result.domainPassword)}</code>\n`;
@@ -314,6 +317,7 @@ function initializeBotHandlers(bot) {
             await safeSendMessage(chatId, message, { parse_mode: "HTML" });
           } else {
             let message = `❌ <b>Failed [${currentIdx}] for ${escapeHTML(accountData.email)}</b>\n`;
+            message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
             if (result.log && result.log.includes("CAPTCHA_DETECTED")) {
               message += `🚨 <b>CAPTCHA DETECTED!</b>\n`;
             }

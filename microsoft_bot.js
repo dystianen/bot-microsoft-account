@@ -1,6 +1,7 @@
 const { chromium } = require("playwright-core");
 const fs = require("fs");
 const config = require("./config");
+const date = require('date-and-time')
 
 const SPINNER_SELECTOR =
   '[data-testid="spinner"], .ms-Spinner, [class*="spinner" i]';
@@ -1211,7 +1212,7 @@ class MicrosoftBot {
         success: false,
         domainEmail: "",
         domainPassword: "",
-        error: `[${new Date().toISOString()}] Step: ${step} - ${error.message}`,
+        error: `[${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}] Step: ${step} - ${error.message}`,
       };
     }
   }
