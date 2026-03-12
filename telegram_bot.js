@@ -3,7 +3,7 @@ const config = require("./config");
 const { processSingleAccount } = require("./index");
 const connectDB = require("./db");
 const { SuccessAccount, VCC, UserConfig } = require("./models");
-const date = require('date-and-time')
+const date = require("date-and-time");
 
 // Wrap in an async function to allow awaiting connection
 async function startBot() {
@@ -32,7 +32,6 @@ async function startBot() {
 
 // Separate handlers to keep it clean
 function initializeBotHandlers(bot) {
-
   // Sequential message queue for Telegram
   let _msgQueue = Promise.resolve();
   async function safeSendMessage(chatId, text, options = {}) {
@@ -54,14 +53,20 @@ function initializeBotHandlers(bot) {
 
   function escapeHTML(str) {
     if (!str) return "";
-    return str.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return str
+      .toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   // Memory storage for temporary interactive steps and pending accounts
   const sessions = {};
 
   async function getUserConfig(telegram_id) {
-    let userConf = await UserConfig.findOne({ telegram_id: telegram_id.toString() });
+    let userConf = await UserConfig.findOne({
+      telegram_id: telegram_id.toString(),
+    });
     if (!userConf) {
       userConf = new UserConfig({
         telegram_id: telegram_id.toString(),
@@ -81,7 +86,8 @@ function initializeBotHandlers(bot) {
         [{ text: "➕ Add Account" }, { text: "💳 Add VCC" }],
         [{ text: "🚀 Generate" }, { text: "📊 Check VCC" }],
         [{ text: "📜 History" }, { text: "⚙️ Config" }],
-        [{ text: "🗑️ Delete Success" }, { text: "🧹 Reset Session" }],
+        [{ text: "🧹 Reset Session" }, { text: "🗑️ Delete VCC" }],
+        [{ text: "🗑️ Delete Success" }],
       ],
       resize_keyboard: true,
     },
@@ -124,10 +130,18 @@ function initializeBotHandlers(bot) {
 
   bot.onText(/📊 Check VCC/, async (msg) => {
     const chatId = msg.chat.id;
-    const vccs = await VCC.find({ telegram_id: chatId.toString(), saldo: { $gt: 0 }, status: "active" });
+    const vccs = await VCC.find({
+      telegram_id: chatId.toString(),
+      saldo: { $gt: 0 },
+      status: "active",
+    });
 
     if (vccs.length === 0) {
-      return bot.sendMessage(chatId, "No active VCCs found in database.", mainMenu);
+      return bot.sendMessage(
+        chatId,
+        "No active VCCs found in database.",
+        mainMenu,
+      );
     }
 
     let summary = `💳 <b>Available VCCs:</b>\n\n`;
@@ -142,18 +156,40 @@ function initializeBotHandlers(bot) {
   bot.onText(/🧹 Reset Session/, (msg) => {
     const chatId = msg.chat.id;
     sessions[chatId] = { accounts: [], step: "IDLE", running: false };
-    bot.sendMessage(chatId, "Temporary session and pending accounts have been cleared.", mainMenu);
+    bot.sendMessage(
+      chatId,
+      "Temporary session and pending accounts have been cleared.",
+      mainMenu,
+    );
   });
 
   bot.onText(/🗑️ Delete Success/, async (msg) => {
     const chatId = msg.chat.id;
     await SuccessAccount.deleteMany({ telegram_id: chatId.toString() });
-    bot.sendMessage(chatId, "All success records for your account have been deleted from DB.", mainMenu);
+    bot.sendMessage(
+      chatId,
+      "All success records for your account have been deleted from DB.",
+      mainMenu,
+    );
+  });
+
+  bot.onText(/🗑️ Delete VCC/, async (msg) => {
+    const chatId = msg.chat.id;
+    await VCC.deleteMany({ telegram_id: chatId.toString() });
+    bot.sendMessage(
+      chatId,
+      "All VCC records for your account have been deleted from DB.",
+      mainMenu,
+    );
   });
 
   bot.onText(/📜 History/, async (msg) => {
     const chatId = msg.chat.id;
-    const history = await SuccessAccount.find({ telegram_id: chatId.toString() }).sort({ createdAt: -1 }).limit(100);
+    const history = await SuccessAccount.find({
+      telegram_id: chatId.toString(),
+    })
+      .sort({ createdAt: -1 })
+      .limit(100);
 
     if (history.length === 0) {
       return bot.sendMessage(chatId, "No history found in database.", mainMenu);
@@ -161,7 +197,9 @@ function initializeBotHandlers(bot) {
 
     let summary = `📜 <b>Last 100 Success Accounts:</b>\n\n`;
     history.forEach((item, idx) => {
-      const dateStr = item.createdAt ? date.format(item.createdAt, 'DD MMM YYYY HH:mm', true) : "N/A";
+      const dateStr = item.createdAt
+        ? date.format(item.createdAt, "DD MMM YYYY HH:mm", true)
+        : "N/A";
       summary += `${idx + 1}. [${dateStr}] <code>${item.domainEmail}</code> | <code>${item.domainPassword}</code>\n`;
     });
 
@@ -176,8 +214,18 @@ function initializeBotHandlers(bot) {
       reply_markup: {
         inline_keyboard: [
           [{ text: "Set Microsoft URL", callback_data: `set_url` }],
-          [{ text: `Concurrency: ${userConf.concurrencyLimit}`, callback_data: `set_concurrency` }],
-          [{ text: `Max Per VCC: ${userConf.maxAccountsPerPayment}`, callback_data: `set_max_vcc` }],
+          [
+            {
+              text: `Concurrency: ${userConf.concurrencyLimit}`,
+              callback_data: `set_concurrency`,
+            },
+          ],
+          [
+            {
+              text: `Max Per VCC: ${userConf.maxAccountsPerPayment}`,
+              callback_data: `set_max_vcc`,
+            },
+          ],
           [{ text: "Set Proxy Username", callback_data: "set_proxy_user" }],
           [{ text: "Set Proxy Password", callback_data: "set_proxy_pass" }],
         ],
@@ -187,10 +235,10 @@ function initializeBotHandlers(bot) {
     bot.sendMessage(
       chatId,
       `⚙️ <b>Current Configuration:</b>\n\n` +
-      `URL: <code>${userConf.microsoftUrl}</code>\n` +
-      `Concurrency: ${userConf.concurrencyLimit}\n` +
-      `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-      `Proxy User: <code>${userConf.proxyUsername}</code>`,
+        `URL: <code>${userConf.microsoftUrl}</code>\n` +
+        `Concurrency: ${userConf.concurrencyLimit}\n` +
+        `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
+        `Proxy User: <code>${userConf.proxyUsername}</code>`,
       { parse_mode: "HTML", ...options },
     );
   });
@@ -201,17 +249,27 @@ function initializeBotHandlers(bot) {
     const data = callbackQuery.data;
 
     // Initialize session if it doesn't exist (e.g. after restart)
-    sessions[chatId] = sessions[chatId] || { accounts: [], step: "IDLE", running: false };
+    sessions[chatId] = sessions[chatId] || {
+      accounts: [],
+      step: "IDLE",
+      running: false,
+    };
 
     if (data === "set_url") {
       sessions[chatId].step = "SET_URL";
       bot.sendMessage(chatId, "Please send the new Microsoft Signup URL.");
     } else if (data === "set_concurrency") {
       sessions[chatId].step = "SET_CONCURRENCY";
-      bot.sendMessage(chatId, "Please send the new concurrency limit (number).");
+      bot.sendMessage(
+        chatId,
+        "Please send the new concurrency limit (number).",
+      );
     } else if (data === "set_max_vcc") {
       sessions[chatId].step = "SET_MAX_VCC";
-      bot.sendMessage(chatId, "Please send the maximum accounts allowed per VCC (number).");
+      bot.sendMessage(
+        chatId,
+        "Please send the maximum accounts allowed per VCC (number).",
+      );
     } else if (data === "set_proxy_user") {
       sessions[chatId].step = "SET_PROXY_USER";
       bot.sendMessage(chatId, "Please send the new Proxy Username.");
@@ -230,41 +288,66 @@ function initializeBotHandlers(bot) {
     }
 
     if (session.accounts.length === 0) {
-      return bot.sendMessage(chatId, "Please add accounts to the session first.");
+      return bot.sendMessage(
+        chatId,
+        "Please add accounts to the session first.",
+      );
     }
 
     const userConf = await getUserConfig(chatId);
-    const vccs = await VCC.find({ telegram_id: chatId.toString(), saldo: { $gt: 0 }, status: "active" });
+    const vccs = await VCC.find({
+      telegram_id: chatId.toString(),
+      saldo: { $gt: 0 },
+      status: "active",
+    });
 
     if (vccs.length === 0) {
-      return bot.sendMessage(chatId, "No active VCCs with balance found in database.");
+      return bot.sendMessage(
+        chatId,
+        "No active VCCs with balance found in database.",
+      );
     }
 
     session.running = true;
     sessions[chatId] = session;
 
-    console.log(`[Batch] Starting for user ${chatId}. Concurrency: ${userConf.concurrencyLimit}, Max per VCC: ${userConf.maxAccountsPerPayment}`);
-    bot.sendMessage(chatId, `🚀 Starting batch for ${session.accounts.length} accounts using ${vccs.length} VCCs (Concurrency: ${userConf.concurrencyLimit})...`);
+    console.log(
+      `[Batch] Starting for user ${chatId}. Concurrency: ${userConf.concurrencyLimit}, VCCs: ${vccs.length}`,
+    );
+    bot.sendMessage(
+      chatId,
+      `🚀 Starting batch for ${session.accounts.length} accounts using ${vccs.length} VCCs (Concurrency: ${userConf.concurrencyLimit})...`,
+    );
 
     const runQueue = async () => {
-      // Semaphore untuk batasi browser terbuka bersamaan
       let activeWorkers = 0;
       const maxWorkers = userConf.concurrencyLimit;
 
-      const processAccount = async (accountData, currentIdx) => {
-        // Cari VCC yang tersedia
-        let vcc = await VCC.findOne({
-          telegram_id: chatId.toString(),
-          saldo: { $gt: 0 },
-          status: "active",
-        });
+      // ─── VCC round-robin state ───────────────────────────────────────────────
+      // vccPool holds only ACTIVE vccs with saldo > 0.
+      // vccIndex cycles 0 → pool.length-1 → 0 → ...
+      // Browsers launched at the same time get DIFFERENT indices.
+      let vccPool = [...vccs]; // shallow copy so we can splice inactive ones out
+      let vccIndex = 0;
 
-        if (!vcc) {
-          await safeSendMessage(chatId, "❌ No more active VCCs with balance found.");
-          return;
-        }
+      const getNextVcc = () => {
+        // Remove exhausted VCCs from the pool first
+        vccPool = vccPool.filter((v) => v.saldo > 0 && v.status === "active");
 
-        await safeSendMessage(chatId, `⏳ [${currentIdx}] Processing: ${escapeHTML(accountData.email)} using VCC ending in ${vcc.cardNumber.slice(-4)}`);
+        if (vccPool.length === 0) return null;
+
+        const vcc = vccPool[vccIndex % vccPool.length];
+        vccIndex++;
+        return vcc;
+      };
+      // ────────────────────────────────────────────────────────────────────────
+
+      const processAccount = async (accountData, currentIdx, vcc) => {
+        // vcc is pre-assigned by the caller — no findOne() race here
+        await safeSendMessage(
+          chatId,
+          `⏳ [${currentIdx}] Processing: ${escapeHTML(accountData.email)} using VCC ending in ${vcc.cardNumber.slice(-4)}`,
+        );
 
         const pairedData = {
           microsoftAccount: accountData,
@@ -283,28 +366,35 @@ function initializeBotHandlers(bot) {
         try {
           const onPaymentSaved = async () => {
             try {
-              // Atomic: hanya decrement kalau saldo > 0
               const updatedVcc = await VCC.findOneAndUpdate(
-                { _id: vcc._id, saldo: { $gt: 0 } },  // ← guard condition
+                { _id: vcc._id, saldo: { $gt: 0 } },
                 { $inc: { saldo: -1 } },
-                { new: true }
+                { new: true },
               );
 
               if (!updatedVcc) {
-                // Saldo sudah 0 atau VCC tidak ditemukan — langsung inactive
                 await VCC.findByIdAndUpdate(vcc._id, { status: "inactive" });
-                console.log(`[DB] VCC ****${vcc.cardNumber.slice(-4)} skipped (saldo habis), set inactive`);
+                vcc.saldo = 0;
+                vcc.status = "inactive";
+                console.log(
+                  `[DB] VCC ****${vcc.cardNumber.slice(-4)} saldo habis, set inactive`,
+                );
                 return;
               }
 
-              console.log(`[DB] VCC ****${vcc.cardNumber.slice(-4)} saldo: ${vcc.saldo} → ${updatedVcc.saldo}`);
+              console.log(
+                `[DB] VCC ****${vcc.cardNumber.slice(-4)} saldo: ${vcc.saldo} → ${updatedVcc.saldo}`,
+              );
+              // Sync local pool object so getNextVcc() filter sees the update
+              vcc.saldo = updatedVcc.saldo;
 
               if (updatedVcc.saldo <= 0) {
                 await VCC.findByIdAndUpdate(vcc._id, { status: "inactive" });
-                console.log(`[DB] VCC ****${vcc.cardNumber.slice(-4)} set inactive`);
+                vcc.status = "inactive";
+                console.log(
+                  `[DB] VCC ****${vcc.cardNumber.slice(-4)} set inactive`,
+                );
               }
-
-              vcc.saldo = updatedVcc.saldo;
             } catch (err) {
               console.error(`[DB] onPaymentSaved error:`, err.message);
             }
@@ -319,14 +409,14 @@ function initializeBotHandlers(bot) {
 
           if (result.status === "SUCCESS") {
             let message = `✅ <b>Success [${currentIdx}]</b>\n`;
-            message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
+            message += `Time: <code>${date.format(new Date(), "DD MMM YYYY HH:mm", true)}</code>\n`;
             message += `Email: <code>${escapeHTML(accountData.email)}</code>\n`;
             message += `Domain: <code>${escapeHTML(result.domainEmail)}</code>\n`;
             message += `Password: <code>${escapeHTML(result.domainPassword)}</code>\n`;
             await safeSendMessage(chatId, message, { parse_mode: "HTML" });
           } else {
             let message = `❌ <b>Failed [${currentIdx}] for ${escapeHTML(accountData.email)}</b>\n`;
-            message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
+            message += `Time: <code>${date.format(new Date(), "DD MMM YYYY HH:mm", true)}</code>\n`;
             if (result.log && result.log.includes("CAPTCHA_DETECTED")) {
               message += `🚨 <b>CAPTCHA DETECTED!</b>\n`;
             }
@@ -342,47 +432,60 @@ function initializeBotHandlers(bot) {
         let globalIdx = 0;
         const pendingPromises = new Set();
 
-        // Loop utama — terus berjalan selama ada akun DI antrian
         while (true) {
-          // Kalau ada slot kosong dan ada akun di antrian, ambil dan jalankan
           if (activeWorkers < maxWorkers && session.accounts.length > 0) {
+            // ── Assign VCC BEFORE spawning the worker ──────────────────────────
+            const vcc = getNextVcc();
+            if (!vcc) {
+              await safeSendMessage(
+                chatId,
+                "❌ No more active VCCs with balance found.",
+              );
+              break;
+            }
+
             const accountData = session.accounts.shift();
             globalIdx++;
             const currentIdx = globalIdx;
 
             activeWorkers++;
-            const promise = processAccount(accountData, currentIdx).finally(() => {
+            const promise = processAccount(
+              accountData,
+              currentIdx,
+              vcc,
+            ).finally(() => {
               activeWorkers--;
               pendingPromises.delete(promise);
             });
             pendingPromises.add(promise);
 
-            // Jika masih ada akun lagi (baik sekarang atau yang akan ditambah),
-            // tunggu 60 detik sebelum mengambil akun berikutnya
             if (session.accounts.length > 0 || activeWorkers < maxWorkers) {
               console.log(`[Queue] Waiting 60s before next account...`);
               await new Promise((r) => setTimeout(r, 60000));
             }
           } else if (activeWorkers === 0 && session.accounts.length === 0) {
-            // Semua selesai
             break;
           } else {
-            // Semua slot penuh atau antrian kosong tapi masih ada yang jalan
-            // Tunggu sebentar lalu cek lagi (mendukung add akun saat running)
             await new Promise((r) => setTimeout(r, 2000));
           }
         }
 
-        // Tunggu semua worker selesai
         if (pendingPromises.size > 0) {
           await Promise.all(Array.from(pendingPromises));
         }
       } catch (err) {
         console.error("[Queue Error]", err);
-        await safeSendMessage(chatId, `⚠️ Queue error: ${escapeHTML(err.message)}`);
+        await safeSendMessage(
+          chatId,
+          `⚠️ Queue error: ${escapeHTML(err.message)}`,
+        );
       } finally {
         session.running = false;
-        bot.sendMessage(chatId, "🏁 Finished processing session accounts.", mainMenu);
+        bot.sendMessage(
+          chatId,
+          "🏁 Finished processing session accounts.",
+          mainMenu,
+        );
       }
     };
 
@@ -422,7 +525,11 @@ function initializeBotHandlers(bot) {
         }
       }
       if (added > 0) {
-        bot.sendMessage(chatId, `Successfully added ${added} accounts to memory. (Not in DB)`, mainMenu);
+        bot.sendMessage(
+          chatId,
+          `Successfully added ${added} accounts to memory. (Not in DB)`,
+          mainMenu,
+        );
         session.step = "IDLE";
       } else {
         bot.sendMessage(chatId, "Invalid format. Use pipe-separated format.");
@@ -451,7 +558,11 @@ function initializeBotHandlers(bot) {
         }
       }
       if (added > 0) {
-        bot.sendMessage(chatId, `Successfully added ${added} VCCs to DB.`, mainMenu);
+        bot.sendMessage(
+          chatId,
+          `Successfully added ${added} VCCs to DB.`,
+          mainMenu,
+        );
         session.step = "IDLE";
       } else {
         bot.sendMessage(chatId, "Invalid format or VCC already exists.");
