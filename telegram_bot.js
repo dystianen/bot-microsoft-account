@@ -343,7 +343,6 @@ function initializeBotHandlers(bot) {
       // ────────────────────────────────────────────────────────────────────────
 
       const processAccount = async (accountData, currentIdx, vcc) => {
-        // vcc is pre-assigned by the caller — no findOne() race here
         await safeSendMessage(
           chatId,
           `⏳ [${currentIdx}] Processing: ${escapeHTML(accountData.email)} using VCC ending in ${vcc.cardNumber.slice(-4)}`,
@@ -363,43 +362,69 @@ function initializeBotHandlers(bot) {
           proxyPassword: userConf.proxyPassword,
         };
 
+        // ── Capture vcc._id saja — bukan seluruh object ──────────────────────────
+        // Object `vcc` bisa berubah di luar closure ini, tapi _id tidak pernah berubah
+        const vccId = vcc._id;
+        const vccLast4 = vcc.cardNumber.slice(-4);
+
+        const onPaymentSaved = async () => {
+          console.log(
+            `[onPaymentSaved] VCC ****${vccLast4} — attempting decrement...`,
+          );
+
+          // Selalu fetch dari DB by _id — jangan pakai local object yang mungkin stale
+          const freshVcc = await VCC.findById(vccId);
+          if (!freshVcc) {
+            console.error(
+              `[onPaymentSaved] VCC ****${vccLast4} tidak ditemukan di DB`,
+            );
+            return;
+          }
+
+          console.log(
+            `[onPaymentSaved] VCC ****${vccLast4} saldo sekarang di DB: ${freshVcc.saldo}, status: ${freshVcc.status}`,
+          );
+
+          if (freshVcc.saldo <= 0 || freshVcc.status !== "active") {
+            console.warn(
+              `[onPaymentSaved] VCC ****${vccLast4} sudah habis/inactive, skip decrement`,
+            );
+            return;
+          }
+
+          const updatedVcc = await VCC.findOneAndUpdate(
+            { _id: vccId, saldo: { $gt: 0 } }, // atomic guard
+            { $inc: { saldo: -1 } },
+            { new: true },
+          );
+
+          if (!updatedVcc) {
+            // Race condition: saldo habis tepat sebelum update
+            await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
+            // Sync pool object juga
+            vcc.saldo = 0;
+            vcc.status = "inactive";
+            console.warn(
+              `[onPaymentSaved] VCC ****${vccLast4} race condition — set inactive`,
+            );
+            return;
+          }
+
+          console.log(
+            `[onPaymentSaved] VCC ****${vccLast4} saldo: ${freshVcc.saldo} → ${updatedVcc.saldo}`,
+          );
+
+          // Sync pool object agar getNextVcc() filter bisa menyingkirkan VCC ini
+          vcc.saldo = updatedVcc.saldo;
+
+          if (updatedVcc.saldo <= 0) {
+            await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
+            vcc.status = "inactive";
+            console.log(`[onPaymentSaved] VCC ****${vccLast4} set inactive`);
+          }
+        };
+
         try {
-          const onPaymentSaved = async () => {
-            try {
-              const updatedVcc = await VCC.findOneAndUpdate(
-                { _id: vcc._id, saldo: { $gt: 0 } },
-                { $inc: { saldo: -1 } },
-                { new: true },
-              );
-
-              if (!updatedVcc) {
-                await VCC.findByIdAndUpdate(vcc._id, { status: "inactive" });
-                vcc.saldo = 0;
-                vcc.status = "inactive";
-                console.log(
-                  `[DB] VCC ****${vcc.cardNumber.slice(-4)} saldo habis, set inactive`,
-                );
-                return;
-              }
-
-              console.log(
-                `[DB] VCC ****${vcc.cardNumber.slice(-4)} saldo: ${vcc.saldo} → ${updatedVcc.saldo}`,
-              );
-              // Sync local pool object so getNextVcc() filter sees the update
-              vcc.saldo = updatedVcc.saldo;
-
-              if (updatedVcc.saldo <= 0) {
-                await VCC.findByIdAndUpdate(vcc._id, { status: "inactive" });
-                vcc.status = "inactive";
-                console.log(
-                  `[DB] VCC ****${vcc.cardNumber.slice(-4)} set inactive`,
-                );
-              }
-            } catch (err) {
-              console.error(`[DB] onPaymentSaved error:`, err.message);
-            }
-          };
-
           const result = await processSingleAccount(
             pairedData,
             currentIdx - 1,

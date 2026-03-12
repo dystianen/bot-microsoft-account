@@ -32,7 +32,6 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
   let executionResult = null;
 
   try {
-    // 1. Create AdsPower profile
     console.log(`[Account ${index + 1}] Creating AdsPower profile...`);
     const proxyOverride = (accountConfig.proxyUsername && accountConfig.proxyPassword) ? {
       username: accountConfig.proxyUsername,
@@ -42,22 +41,29 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
     currentProfileId = await adsPowerHelper.createProfile(profileName, proxyOverride);
     console.log(`[Account ${index + 1}] Created profile: ${currentProfileId}`);
 
-    // 2. Start browser
     console.log(`[Account ${index + 1}] Starting browser...`);
     const headlessOverride = accountConfig.headless !== undefined ? accountConfig.headless : null;
     const { wsUrl } = await adsPowerHelper.startBrowser(currentProfileId, headlessOverride);
     console.log(`[Account ${index + 1}] Browser started. WS URL: ${wsUrl}`);
 
-    // 3. Run Microsoft automation
-    bot = new MicrosoftBot(wsUrl, accountConfig, onPaymentSaved);
+    // ── Wrap onPaymentSaved dengan logging agar kita tahu kapan dipanggil ──
+    const wrappedOnPaymentSaved = async () => {
+      console.log(`[Account ${index + 1}] onPaymentSaved triggered — decrementing VCC...`);
+      try {
+        await onPaymentSaved();
+        console.log(`[Account ${index + 1}] onPaymentSaved completed.`);
+      } catch (err) {
+        console.error(`[Account ${index + 1}] onPaymentSaved threw:`, err.message);
+      }
+    };
+
+    bot = new MicrosoftBot(wsUrl, accountConfig, wrappedOnPaymentSaved);
     result = await bot.run();
 
     if (result && result.success) {
       console.log(
-        `[Account ${index + 1}] Automation finished successfully. Domain: ${result.domainEmail} Password: ${accountConfig.microsoftAccount.password}`,
+        `[Account ${index + 1}] Automation finished successfully. Domain: ${result.domainEmail}`,
       );
-      // onPaymentSaved is now handled by MicrosoftBot immediately after payment is saved 
-      // instead of waiting until the end of the run.
       executionResult = {
         status: "SUCCESS",
         domainEmail: result.domainEmail,
@@ -78,21 +84,19 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
   } catch (err) {
     console.error(`\n[ERROR Account ${index + 1}] failed:`, err.message);
     executionResult = {
-      status: "ERROR",
+      status: "FAILED",
       domainEmail: "",
       domainPassword: "",
       log: err.message,
     };
   } finally {
-    // If automation failed or had an error, wait 5 seconds so the user can see it
     if (executionResult && executionResult.status !== "SUCCESS") {
-      console.log(`[Account ${index + 1}] Automation failed/errored. Waiting 5s before cleanup...`);
+      console.log(`[Account ${index + 1}] Waiting 5s before cleanup...`);
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
     console.log(`[Account ${index + 1}] Starting cleanup...`);
 
-    // 1. Close the browser instance through Playwright first
     if (bot) {
       try {
         await bot.cleanup();
@@ -101,19 +105,15 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
       }
     }
 
-    // 2. Stop & Delete profil AdsPower
     if (currentProfileId) {
       try {
         await adsPowerHelper.stopBrowser(currentProfileId);
         console.log(`[Account ${index + 1}] Browser stopped.`);
       } catch (e) {
-        console.warn(
-          `[Account ${index + 1}] stopBrowser warning (proceeding anyway):`,
-          e.message,
-        );
+        console.warn(`[Account ${index + 1}] stopBrowser warning:`, e.message);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 3000)); // 3s cukup, 10s terlalu lama
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       try {
         await adsPowerHelper.deleteProfile(currentProfileId);
@@ -132,7 +132,6 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
       };
     }
 
-    // Save to global history if success
     if (executionResult.status === "SUCCESS") {
       executionResult.email = accountConfig.microsoftAccount.email;
       await saveToDB(executionResult, accountConfig.telegram_id);
