@@ -19,7 +19,7 @@ async function saveToDB(result, telegram_id) {
   }
 }
 
-async function processSingleAccount(accountConfig, index, total, onPaymentSaved) {
+async function processSingleAccount(accountConfig, index, total, onPaymentSaved, onPaymentLimitReached) {
   const profileName = `MS-Account-${Date.now()}-${index}`;
 
   console.log(
@@ -56,8 +56,19 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
         console.error(`[Account ${index + 1}] onPaymentSaved threw:`, err.message);
       }
     };
+    // ── Wrap onPaymentLimitReached ──
+    const wrappedOnPaymentLimitReached = async () => {
+      console.warn(`[Account ${index + 1}] onPaymentLimitReached triggered — marking VCC inactive...`);
+      try {
+        if (typeof onPaymentLimitReached === "function") {
+          await onPaymentLimitReached();
+        }
+      } catch (err) {
+        console.error(`[Account ${index + 1}] onPaymentLimitReached threw:`, err.message);
+      }
+    };
 
-    bot = new MicrosoftBot(wsUrl, accountConfig, wrappedOnPaymentSaved);
+    bot = new MicrosoftBot(wsUrl, accountConfig, wrappedOnPaymentSaved, wrappedOnPaymentLimitReached);
     result = await bot.run();
 
     if (result && result.success) {

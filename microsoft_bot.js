@@ -9,13 +9,35 @@ const SPINNER_SELECTOR =
 const HARD_TIMEOUT = 1.5 * 60 * 1000; // 1 menit 30 detik
 
 class MicrosoftBot {
-  constructor(wsUrl, accountConfig, onPaymentSaved) {
+  constructor(wsUrl, accountConfig, onPaymentSaved, onPaymentLimitReached) {
     this.wsUrl = wsUrl;
     this.browser = null;
     this.context = null;
     this.page = null;
     this.accountConfig = accountConfig;
     this.onPaymentSaved = onPaymentSaved;
+    this.onPaymentLimitReached = onPaymentLimitReached;
+    this._paymentSavedTriggered = false;
+  }
+
+  async triggerPaymentSaved() {
+    if (this._paymentSavedTriggered) return;
+    this._paymentSavedTriggered = true;
+    console.log("[INFO] Triggering onPaymentSaved callback...");
+    if (typeof this.onPaymentSaved === "function") {
+      await this.onPaymentSaved().catch((e) =>
+        console.error("[CALLBACK ERROR] onPaymentSaved failed:", e.message),
+      );
+    }
+  }
+
+  async triggerPaymentLimitReached() {
+    console.warn("[WARN] Triggering onPaymentLimitReached callback...");
+    if (typeof this.onPaymentLimitReached === "function") {
+      await this.onPaymentLimitReached().catch((e) =>
+        console.error("[CALLBACK ERROR] onPaymentLimitReached failed:", e.message),
+      );
+    }
   }
 
   // ─── Core helpers ────────────────────────────────────────────────────────────
@@ -279,7 +301,7 @@ class MicrosoftBot {
             state: "detached",
             timeout: 5000,
           })
-          .catch(() => {});
+          .catch(() => { });
 
         return true;
       } catch (err) {
@@ -383,7 +405,7 @@ class MicrosoftBot {
       console.warn(
         `[STEP 5] Email mismatch (attempt ${attempt}/${MAX_RETRIES}): expected "${email}", got "${currentValue}". Retrying...`,
       );
-      await emailInput.selectText().catch(() => {});
+      await emailInput.selectText().catch(() => { });
       await emailInput.fill("");
       await this.humanDelay(200, 400);
       for (const char of email) {
@@ -592,35 +614,26 @@ class MicrosoftBot {
       )
       .first();
 
-    // Button ini optional — pakai isVisible() bukan waitFor agar tidak blocking
     const found = await combinedLocator.isVisible().catch(() => false);
 
     if (!found) {
-      console.log(
-        "[STEP 10] Address confirmation button not found, skipping...",
-      );
+      console.log("[STEP 10] Address confirmation button not found, skipping...");
       return;
     }
 
-    // Cek via aria-label dulu, fallback ke textContent
-    const ariaLabel = await combinedLocator
-      .getAttribute("aria-label")
-      .catch(() => "");
-    const textContent = await combinedLocator.textContent().catch(() => "");
-    const buttonText = (ariaLabel || textContent).trim();
-
-    if (/gunakan alamat ini/i.test(buttonText)) {
-      const radio = this.page.locator('input[type="radio"]').first();
-      const radioVisible = await radio.isVisible().catch(() => false);
-      if (radioVisible) {
-        await radio.click();
-        await this.humanDelay(200, 400);
-      }
+    // Selalu pilih radio button pertama (atas) jika ada
+    const firstRadio = this.page.locator('input[type="radio"]').first();
+    const radioVisible = await firstRadio.isVisible().catch(() => false);
+    if (radioVisible) {
+      await firstRadio.click();
+      await this.humanDelay(200, 400);
     }
 
     await this.randomMouseMove();
     await combinedLocator.click({ force: true });
-    console.log(`[STEP 10] Clicked: "${buttonText}"`);
+
+    const buttonText = await combinedLocator.textContent().catch(() => "");
+    console.log(`[STEP 10] Clicked: "${buttonText.trim()}"`);
     await this.humanDelay(200, 500);
   }
 
@@ -682,14 +695,14 @@ class MicrosoftBot {
 
     await this.waitForVisible(passwordLocator);
     await this.randomMouseMove();
-    await passwordLocator.click({ force: true }).catch(() => {});
+    await passwordLocator.click({ force: true }).catch(() => { });
     await passwordLocator.pressSequentially(
       this.accountConfig.microsoftAccount.password,
       { delay: Math.floor(Math.random() * 30) + 40 },
     );
     await this.humanDelay(1000, 2000);
 
-    await confirmPasswordLocator.click({ force: true }).catch(() => {});
+    await confirmPasswordLocator.click({ force: true }).catch(() => { });
     await confirmPasswordLocator.pressSequentially(
       this.accountConfig.microsoftAccount.password,
       { delay: Math.floor(Math.random() * 20) + 30 },
@@ -708,66 +721,73 @@ class MicrosoftBot {
   async handleOptionalSignIn() {
     console.log("[STEP 11.5] Checking for optional Sign In prompt...");
 
-    // Helper: cek apakah sudah berada di halaman payment
-    const isOnPaymentPage = async () => {
-      return await Promise.any([
-        this.page.waitForURL(/payment|billing|checkout/i, { timeout: 1000 }),
-        this.page
-          .locator(
-            'input[id*="card" i], input[id*="accounttoken" i], input[aria-label*="card number" i], input[aria-label*="Nomor kartu" i]',
-          )
-          .first()
-          .waitFor({ state: "visible", timeout: 1000 }),
-      ])
-        .then(() => true)
-        .catch(() => false);
-    };
-
     try {
+      // Tunggu halaman benar-benar settle setelah submit password
       await this.page.waitForLoadState("domcontentloaded");
       await this.waitForSpinnerGone();
+      await this.humanDelay(800, 1500); // beri waktu DOM stabil
 
-      const signInBtn = this.getGenericButton("Sign In");
-      let signInDetected = false;
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        if (await this.checkForError()) {
-          throw new Error(
-            "MICROSOFT_ERROR_PAGE: Terdeteksi saat pengecekan Sign In.",
-          );
-        }
-
-        // Cek langsung apakah sudah di payment page — kalau iya skip semua retry
-        if (await isOnPaymentPage()) {
-          console.log(
-            "[STEP 11.5] Already on payment page, skipping Sign In check.",
-          );
-          return;
-        }
-
-        signInDetected = await signInBtn
-          .waitFor({ state: "visible", timeout: 5000 })
-          .then(() => true)
-          .catch(() => false);
-
-        if (signInDetected) break;
-        console.log(`Sign In not detected, retry ${attempt}...`);
-        await this.humanDelay(200, 500);
+      if (await this.checkForError()) {
+        throw new Error("MICROSOFT_ERROR_PAGE: Terdeteksi saat pengecekan Sign In.");
       }
 
-      if (!signInDetected) {
-        // Final check sebelum give up: kalau payment page sudah muncul, skip
-        if (await isOnPaymentPage()) {
-          console.log(
-            "[STEP 11.5] Payment page detected after retries, skipping Sign In.",
-          );
-          return;
-        }
-        console.log("No Sign In button detected, skipping...");
+      const signInBtn = this.page.locator([
+        'button:has-text("Sign In")',
+        'button:has-text("Sign-In")',
+        'button:has-text("Masuk")',
+        'a:has-text("Sign In")',
+        'a:has-text("Masuk")',
+        '[data-bi-id*="signin" i]',
+        'button[id*="signin" i]',
+      ].join(', ')).first();
+
+      const paymentPageLocator = this.page.locator(
+        'input[id*="card" i], input[id*="accounttoken" i], input[aria-label*="card number" i], input[aria-label*="Nomor kartu" i]'
+      ).first();
+
+      // Race: Sign In button vs Payment page — prioritaskan deteksi elemen fisik daripada URL
+      const winner = await Promise.race([
+        signInBtn
+          .waitFor({ state: "visible", timeout: 12000 })
+          .then(() => "signin")
+          .catch(() => null),
+
+        paymentPageLocator
+          .waitFor({ state: "visible", timeout: 12000 })
+          .then(() => "payment")
+          .catch(() => null),
+
+        this.page
+          .waitForURL(/payment|billing|checkout/i, { timeout: 12000 })
+          .then(() => "payment_url")
+          .catch(() => null),
+      ]);
+
+      console.log(`[STEP 11.5] Race result: ${winner}`);
+
+      if (winner === "payment") {
+        console.log("[STEP 11.5] Payment field detected, skipping Sign In.");
         return;
       }
 
-      console.log("Sign In detected, clicking...");
+      if (winner === "payment_url") {
+        // Jika hanya URL yang match, cek lagi apakah tombol Sign In sebenarnya ada
+        const signVisible = await signInBtn.isVisible().catch(() => false);
+        if (signVisible) {
+          console.log("[STEP 11.5] URL match payment but Sign In button is visible. Prioritizing Sign In.");
+        } else {
+          console.log("[STEP 11.5] Payment URL detected and no Sign In button found, skipping.");
+          return;
+        }
+      }
+
+      if (!winner || (!winner.includes("signin") && !await signInBtn.isVisible().catch(() => false))) {
+        console.log("[STEP 11.5] No Sign In or Payment page detected, skipping.");
+        return;
+      }
+
+      // Proceed to click Sign In
+      console.log("[STEP 11.5] Sign In detected, clicking...");
       await this.randomMouseMove();
 
       const [popup] = await Promise.all([
@@ -776,13 +796,13 @@ class MicrosoftBot {
       ]);
 
       if (!popup) {
-        console.log("No popup detected after Sign In click.");
+        console.log("[STEP 11.5] No popup after Sign In click, continuing...");
         return;
       }
 
       await popup.waitForLoadState("domcontentloaded");
       const yesBtn = popup.locator(
-        'button:has-text("Yes"), input[value="Yes"], #idSIButton9',
+        'button:has-text("Yes"), input[value="Yes"], #idSIButton9'
       );
       const yesVisible = await yesBtn
         .waitFor({ state: "visible", timeout: 15000 })
@@ -791,14 +811,15 @@ class MicrosoftBot {
 
       if (yesVisible) {
         await yesBtn.click();
-        console.log("Clicked Yes on Stay signed in prompt.");
+        console.log("[STEP 11.5] Clicked Yes on Stay signed in prompt.");
       }
 
-      await popup.waitForLoadState("networkidle").catch(() => {});
-      console.log("Sign In popup handled successfully");
+      await popup.waitForLoadState("networkidle").catch(() => { });
+      console.log("[STEP 11.5] Sign In popup handled successfully.");
+
     } catch (e) {
       if (e.message.includes("MICROSOFT_ERROR_PAGE")) throw e;
-      console.log("Optional Sign In handler skipped:", e.message);
+      console.log("[STEP 11.5] Optional Sign In handler skipped:", e.message);
     }
   }
 
@@ -807,7 +828,7 @@ class MicrosoftBot {
 
     await this.page
       .waitForLoadState("domcontentloaded", { timeout: HARD_TIMEOUT })
-      .catch(() => {});
+      .catch(() => { });
     await this.waitForSpinnerGone(500);
 
     const deadline = Date.now() + HARD_TIMEOUT;
@@ -930,7 +951,7 @@ class MicrosoftBot {
       const errorWatcher = new Promise(async (resolve, reject) => {
         const deadline = Date.now() + timeout;
         while (!resolved && Date.now() < deadline) {
-          await this.page.waitForTimeout(2000).catch(() => {});
+          await this.page.waitForTimeout(2000).catch(() => { });
           if (resolved) break;
           const err = await this.checkForError();
           if (err) {
@@ -961,16 +982,19 @@ class MicrosoftBot {
         makeWatcher(
           this.page.waitForFunction(
             () => {
-              const hasCardInput = !!document.querySelector(
-                'input[id*="accounttoken" i], input[id*="card" i]',
-              );
               const text = document.body.innerText.toLowerCase();
               return (
-                !hasCardInput &&
-                (text.includes("check your info") ||
-                  text.includes("review your order") ||
-                  text.includes("ordersummary") ||
-                  window.location.href.includes("ordersummary"))
+                text.includes("check your info") ||
+                text.includes("review your order") ||
+                text.includes("ordersummary") ||
+                text.includes("tinjau pesanan") ||
+                text.includes("periksa info") ||
+                text.includes("ringkasan pesanan") ||
+                text.includes("setup your account") ||
+                text.includes("siapkan akun") ||
+                text.includes("mulai") ||
+                window.location.href.includes("ordersummary") ||
+                window.location.href.includes("setup-account")
               );
             },
             { timeout },
@@ -1016,23 +1040,32 @@ class MicrosoftBot {
     }
 
     if (result === "success") {
-      console.log("[INFO] Payment successfully saved.");
-      if (typeof this.onPaymentSaved === "function") {
-        await this.onPaymentSaved().catch((e) =>
-          console.error("[CALLBACK ERROR]", e.message),
-        );
-      }
+      console.log("[INFO] Payment successfully saved signal detected.");
+      await this.triggerPaymentSaved();
     } else if (result === "error") {
       const msg = await this.page
         .locator('span[data-automation-id="error-message"]')
         .first()
         .textContent()
         .catch(() => "Unknown payment error");
-      throw new Error(`PAYMENT_DECLINED: ${msg?.trim()}`);
+
+      const errorText = msg?.trim() || "Unknown payment error";
+      console.error(`[ERROR] Payment error detected: ${errorText}`);
+
+      // Deteksi limit VCC (Max limit) atau kartu ditolak ditandai dengan saran ganti kartu/metode
+      const isLimitError = /limit|maksimum|maximum|too many|batas|sampai batas|different card|different payment|kartu lain|metode pembayaran lain|kartu yang berbeda/i.test(errorText.toLowerCase());
+
+      if (isLimitError) {
+        console.warn(`[WARN] VCC Limit reached detected from message: "${errorText}"`);
+        await this.triggerPaymentLimitReached();
+      }
+
+      throw new Error(`PAYMENT_DECLINED: ${errorText}${isLimitError ? " (LIMIT_REACHED)" : ""}`);
     } else if (result === null) {
       console.warn(
-        "[WARN] Payment result timeout — tidak ada sinyal jelas dari halaman",
+        "[WARN] Payment result timeout - long loading time, trigger payment saved",
       );
+      await this.triggerPaymentSaved();
     }
 
     console.log("[INFO] Payment step finished");
@@ -1112,8 +1145,8 @@ class MicrosoftBot {
     console.log("[INFO] Start Trial clicked");
 
     await Promise.race([
-      this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
-      this.page.waitForLoadState("networkidle").catch(() => {}),
+      this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => { }),
+      this.page.waitForLoadState("networkidle").catch(() => { }),
     ]);
   }
 
@@ -1185,75 +1218,55 @@ class MicrosoftBot {
 
   async checkForError() {
     try {
-      // 1. Cek pesan error validasi di field (biasanya merah di bawah input)
-      const fieldError = this.page
-        .locator('[data-automation-id="error-message"]')
-        .first();
+      // 1. Cek keberadaan iframe Arkose/Captcha secara eksplisit
+      const captchaIndicators = [
+        'button:has-text("solve the puzzle")',
+        'h2:has-text("Protecting your account")'
+      ];
+
+      for (const selector of captchaIndicators) {
+        if (await this.page.locator(selector).first().isVisible().catch(() => false)) {
+          return "CAPTCHA_DETECTED: Microsoft/Arkose puzzle visible.";
+        }
+      }
+
+      // 2. Cek pesan error validasi di field
+      const fieldError = this.page.locator('[data-automation-id="error-message"]').first();
       if (await fieldError.isVisible().catch(() => false)) {
         const msg = (await fieldError.textContent().catch(() => "")).trim();
         return `Field Validation Error: ${msg}`;
       }
 
-      // 2. Cek teks body untuk indikasi error Microsoft (Optimized evaluate)
-      const detailedError = await this.page
-        .evaluate(() => {
-          const text = document.body.innerText;
-          const lowerText = text.toLowerCase();
+      // 3. Cek teks di SEMUA frame (termasuk iframe tersembunyi)
+      const markers = [
+        "something went wrong",
+        "something happened",
+        "terjadi sesuatu",
+        "Terjadi kesalahan",
+        "Melindungi akun Anda",
+        "try a different way",
+        "Protecting your account",
+        "Please solve the puzzle",
+        "so we know you're not a robot",
+        "Selesaikan teka-teki",
+        "agar kami tahu Anda bukan robot",
+        "error code",
+        "715-123280",
+      ];
 
-          // List marker error yang sering muncul
-          const markers = [
-            "something went wrong",
-            "error code",
-            "terjadi sesuatu",
-            "Terjadi kesalahan",
-            "Melindungi akun Anda",
-            "715-123280", // Kode blokir umum
-            "incorrectly formatted postal code",
-            "something happened",
-            "we are sorry, but we could not complete this",
-            "try a different way",
-            "We're checking to make sure we can offer you Microsoft products and services.",
-            "Verification code",
-            "Kode Verifikasi",
-          ];
-
-          const foundMarker = markers.find((m) => lowerText.includes(m));
-          if (!foundMarker) return null;
-
-          // Pengecualian protektif agar tidak false positive
-          if (
-            lowerText.includes("something happened") &&
-            lowerText.includes("something happened to be")
-          ) {
-            return null;
+      for (const frame of this.page.frames()) {
+        try {
+          const frameText = await frame.innerText('body').catch(() => "");
+          const lowerFrameText = frameText.toLowerCase();
+          const found = markers.find(m => lowerFrameText.includes(m.toLowerCase()));
+          if (found) {
+            console.log(`[ERROR] Marker "${found}" detected in frame: ${frame.url()}`);
+            return found;
           }
-
-          // Coba cari elemen yang mengandung teks error untuk ambil context lebih banyak
-          // Jika ada element dengan class atau ID 'error', 'errorMessage', dsb.
-          const errorContainer = document.querySelector(
-            '[role="alert"], [class*="error" i], [id*="error" i]',
-          );
-          if (errorContainer && errorContainer.innerText.length > 5) {
-            return errorContainer.innerText.trim();
-          }
-
-          // Fallback: Ambil potongan teks di sekitar marker atau baris yang mengandung marker
-          const lines = text.split("\n");
-          const errorLine = lines.find((l) =>
-            l.toLowerCase().includes(foundMarker),
-          );
-          return errorLine
-            ? errorLine.trim()
-            : `Indicator detected: ${foundMarker}`;
-        })
-        .catch(() => null);
-
-      if (detailedError) {
-        console.log(`[ERROR] Microsoft error detected: ${detailedError}`);
-        return detailedError;
+        } catch (e) { /* skip inaccessible frames */ }
       }
     } catch (err) {
-      // Ignore silence check errors
+      // Ignore errors during check
     }
     return null;
   }
@@ -1386,6 +1399,10 @@ class MicrosoftBot {
         await this.extractFinalDomainAccount();
 
       console.log("Automation completed successfully");
+
+      // Fallback: Pastikan saldo berkurang jika sampai tahap ini tapi sinyal tadi terlewat
+      await this.triggerPaymentSaved();
+
       return { success: true, domainEmail, domainPassword };
     } catch (error) {
       const step = this._currentStep;

@@ -372,56 +372,40 @@ function initializeBotHandlers(bot) {
             `[onPaymentSaved] VCC ****${vccLast4} — attempting decrement...`,
           );
 
-          // Selalu fetch dari DB by _id — jangan pakai local object yang mungkin stale
-          const freshVcc = await VCC.findById(vccId);
-          if (!freshVcc) {
-            console.error(
-              `[onPaymentSaved] VCC ****${vccLast4} tidak ditemukan di DB`,
-            );
-            return;
-          }
-
-          console.log(
-            `[onPaymentSaved] VCC ****${vccLast4} saldo sekarang di DB: ${freshVcc.saldo}, status: ${freshVcc.status}`,
-          );
-
-          if (freshVcc.saldo <= 0 || freshVcc.status !== "active") {
-            console.warn(
-              `[onPaymentSaved] VCC ****${vccLast4} sudah habis/inactive, skip decrement`,
-            );
-            return;
-          }
-
+          // Atomic decrement $inc: -1, tapi hanya jika saldo > 0
           const updatedVcc = await VCC.findOneAndUpdate(
-            { _id: vccId, saldo: { $gt: 0 } }, // atomic guard
+            { _id: vccId, saldo: { $gt: 0 } },
             { $inc: { saldo: -1 } },
-            { new: true },
+            { returnDocument: 'after' },
           );
 
           if (!updatedVcc) {
-            // Race condition: saldo habis tepat sebelum update
+            console.warn(`[onPaymentSaved] VCC ****${vccLast4} saldo already 0 or VCC not found. Setting inactive.`);
             await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
-            // Sync pool object juga
             vcc.saldo = 0;
             vcc.status = "inactive";
-            console.warn(
-              `[onPaymentSaved] VCC ****${vccLast4} race condition — set inactive`,
-            );
             return;
           }
 
           console.log(
-            `[onPaymentSaved] VCC ****${vccLast4} saldo: ${freshVcc.saldo} → ${updatedVcc.saldo}`,
+            `[onPaymentSaved] VCC ****${vccLast4} saldo updated: ${updatedVcc.saldo + 1} → ${updatedVcc.saldo}`,
           );
 
-          // Sync pool object agar getNextVcc() filter bisa menyingkirkan VCC ini
+          // Update pool object for getNextVcc filtering
           vcc.saldo = updatedVcc.saldo;
 
           if (updatedVcc.saldo <= 0) {
             await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
             vcc.status = "inactive";
-            console.log(`[onPaymentSaved] VCC ****${vccLast4} set inactive`);
+            console.log(`[onPaymentSaved] VCC ****${vccLast4} reached 0 and set to inactive.`);
           }
+        };
+
+        const onPaymentLimitReached = async () => {
+          console.warn(`[onPaymentLimitReached] VCC ****${vccLast4} reported limit reached. Marking inactive.`);
+          await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
+          vcc.status = "inactive";
+          vcc.saldo = 0; // pastikan tidak dipakai lagi
         };
 
         try {
@@ -430,6 +414,7 @@ function initializeBotHandlers(bot) {
             currentIdx - 1,
             currentIdx,
             onPaymentSaved,
+            onPaymentLimitReached,
           );
 
           if (result.status === "SUCCESS") {
