@@ -235,10 +235,10 @@ function initializeBotHandlers(bot) {
     bot.sendMessage(
       chatId,
       `⚙️ <b>Current Configuration:</b>\n\n` +
-        `URL: <code>${userConf.microsoftUrl}</code>\n` +
-        `Concurrency: ${userConf.concurrencyLimit}\n` +
-        `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-        `Proxy User: <code>${userConf.proxyUsername}</code>`,
+      `URL: <code>${userConf.microsoftUrl}</code>\n` +
+      `Concurrency: ${userConf.concurrencyLimit}\n` +
+      `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
+      `Proxy User: <code>${userConf.proxyUsername}</code>`,
       { parse_mode: "HTML", ...options },
     );
   });
@@ -545,8 +545,10 @@ function initializeBotHandlers(bot) {
         bot.sendMessage(chatId, "Invalid format. Use pipe-separated format.");
       }
     } else if (session.step === "WAIT_VCC") {
-      const lines = text.split("\n");
+      const lines = text.split("\n").filter((l) => l.trim() !== "");
       let added = 0;
+      let duplicates = 0;
+      let invalidLines = 0;
       const userConf = await getUserConfig(chatId);
 
       for (const line of lines) {
@@ -559,23 +561,30 @@ function initializeBotHandlers(bot) {
               cvv: parts[1],
               expMonth: parts[2],
               expYear: parts[3],
-              saldo: userConf.maxAccountsPerPayment, // Use database config
+              saldo: userConf.maxAccountsPerPayment,
               telegram_id: chatId.toString(),
             });
             await vcc.save();
             added++;
+          } else {
+            duplicates++;
           }
+        } else {
+          invalidLines++;
         }
       }
+
+      session.step = "IDLE"; // ← selalu reset, apapun hasilnya
+
       if (added > 0) {
-        bot.sendMessage(
-          chatId,
-          `Successfully added ${added} VCCs to DB.`,
-          mainMenu,
-        );
-        session.step = "IDLE";
+        let msg = `✅ Successfully added ${added} VCC(s) to DB.`;
+        if (duplicates > 0) msg += `\n⚠️ ${duplicates} VCC(s) skipped (already exists).`;
+        if (invalidLines > 0) msg += `\n❌ ${invalidLines} line(s) invalid format.`;
+        bot.sendMessage(chatId, msg, mainMenu);
+      } else if (duplicates > 0 && invalidLines === 0) {
+        bot.sendMessage(chatId, `⚠️ All ${duplicates} VCC(s) already exist in DB.`, mainMenu);
       } else {
-        bot.sendMessage(chatId, "Invalid format or VCC already exists.");
+        bot.sendMessage(chatId, "❌ Invalid format. Use: cardNumber|cvv|expMonth|expYear");
       }
     } else if (session.step === "SET_URL") {
       const userConf = await getUserConfig(chatId);
