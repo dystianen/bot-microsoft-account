@@ -401,20 +401,12 @@ function initializeBotHandlers(bot) {
           }
         };
 
-        const onPaymentLimitReached = async () => {
-          console.warn(`[onPaymentLimitReached] VCC ****${vccLast4} reported limit reached. Marking inactive.`);
-          await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
-          vcc.status = "inactive";
-          vcc.saldo = 0; // pastikan tidak dipakai lagi
-        };
-
         try {
           const result = await processSingleAccount(
             pairedData,
             currentIdx - 1,
             currentIdx,
             onPaymentSaved,
-            onPaymentLimitReached,
           );
 
           if (result.status === "SUCCESS") {
