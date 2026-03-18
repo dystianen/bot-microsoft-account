@@ -1366,6 +1366,16 @@ class MicrosoftBot {
         () => this.confirmAddressIfPrompted(),
         [300, 600],
       );
+
+      if (this.accountConfig.stopPoint === "vcc_success") {
+        console.log("[INFO] Stop point reached: vcc_success. Finalizing account data...");
+        this._currentStep = "Extracting final domain account (early stop)";
+        const { domainEmail, domainPassword } =
+          await this.extractFinalDomainAccount();
+        await this.triggerPaymentSaved();
+        return { success: true, domainEmail, domainPassword };
+      }
+
       await this.executeStep(
         "Accepting trial & clicking Start",
         () => this.acceptTrialAndStart(),
