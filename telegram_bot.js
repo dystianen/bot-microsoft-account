@@ -74,6 +74,7 @@ function initializeBotHandlers(bot) {
         concurrencyLimit: config.concurrencyLimit,
         proxyUsername: config.proxy.username,
         proxyPassword: config.proxy.password,
+        stopPoint: "full",
       });
       await userConf.save();
     }
@@ -248,6 +249,12 @@ function initializeBotHandlers(bot) {
           ],
           [{ text: "Set Proxy Username", callback_data: "set_proxy_user" }],
           [{ text: "Set Proxy Password", callback_data: "set_proxy_pass" }],
+          [
+            {
+              text: `Stop Point: ${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}`,
+              callback_data: "set_stop_point",
+            },
+          ],
         ],
       },
     };
@@ -258,7 +265,8 @@ function initializeBotHandlers(bot) {
       `URL: <code>${userConf.microsoftUrl}</code>\n` +
       `Concurrency: ${userConf.concurrencyLimit}\n` +
       `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-      `Proxy User: <code>${userConf.proxyUsername}</code>`,
+      `Proxy User: <code>${userConf.proxyUsername}</code>\n` +
+      `Stop Point: <b>${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}</b>`,
       { parse_mode: "HTML", ...options },
     );
   });
@@ -296,6 +304,26 @@ function initializeBotHandlers(bot) {
     } else if (data === "set_proxy_pass") {
       sessions[chatId].step = "SET_PROXY_PASS";
       bot.sendMessage(chatId, "Please send the new Proxy Password.");
+    } else if (data === "set_stop_point") {
+      const options = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "VCC Success", callback_data: "stop_vcc" }],
+            [{ text: "Full Step", callback_data: "stop_full" }],
+          ],
+        },
+      };
+      bot.sendMessage(chatId, "Choose where the automation should stop:", options);
+    } else if (data === "stop_vcc" || data === "stop_full") {
+      const stopPoint = data === "stop_vcc" ? "vcc_success" : "full";
+      const userConf = await getUserConfig(chatId);
+      userConf.stopPoint = stopPoint;
+      await userConf.save();
+      bot.sendMessage(
+        chatId,
+        `Stop point updated to: ${stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}`,
+        mainMenu,
+      );
     }
   });
 
@@ -380,6 +408,7 @@ function initializeBotHandlers(bot) {
           microsoftUrl: userConf.microsoftUrl,
           proxyUsername: userConf.proxyUsername,
           proxyPassword: userConf.proxyPassword,
+          stopPoint: userConf.stopPoint,
         };
 
         // ── Capture vcc._id saja — bukan seluruh object ──────────────────────────
@@ -421,20 +450,12 @@ function initializeBotHandlers(bot) {
           }
         };
 
-        const onPaymentLimitReached = async () => {
-          console.warn(`[onPaymentLimitReached] VCC ****${vccLast4} reported limit reached. Marking inactive.`);
-          await VCC.findByIdAndUpdate(vccId, { status: "inactive" });
-          vcc.status = "inactive";
-          vcc.saldo = 0; // pastikan tidak dipakai lagi
-        };
-
         try {
           const result = await processSingleAccount(
             pairedData,
             currentIdx - 1,
             currentIdx,
             onPaymentSaved,
-            onPaymentLimitReached,
           );
 
           if (result.status === "SUCCESS") {

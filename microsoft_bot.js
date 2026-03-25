@@ -9,14 +9,13 @@ const SPINNER_SELECTOR =
 const HARD_TIMEOUT = 1.5 * 60 * 1000; // 1 menit 30 detik
 
 class MicrosoftBot {
-  constructor(wsUrl, accountConfig, onPaymentSaved, onPaymentLimitReached) {
+  constructor(wsUrl, accountConfig, onPaymentSaved) {
     this.wsUrl = wsUrl;
     this.browser = null;
     this.context = null;
     this.page = null;
     this.accountConfig = accountConfig;
     this.onPaymentSaved = onPaymentSaved;
-    this.onPaymentLimitReached = onPaymentLimitReached;
     this._paymentSavedTriggered = false;
   }
 
@@ -31,14 +30,6 @@ class MicrosoftBot {
     }
   }
 
-  async triggerPaymentLimitReached() {
-    console.warn("[WARN] Triggering onPaymentLimitReached callback...");
-    if (typeof this.onPaymentLimitReached === "function") {
-      await this.onPaymentLimitReached().catch((e) =>
-        console.error("[CALLBACK ERROR] onPaymentLimitReached failed:", e.message),
-      );
-    }
-  }
 
   // ─── Core helpers ────────────────────────────────────────────────────────────
 
@@ -1052,15 +1043,7 @@ class MicrosoftBot {
       const errorText = msg?.trim() || "Unknown payment error";
       console.error(`[ERROR] Payment error detected: ${errorText}`);
 
-      // Deteksi limit VCC (Max limit) atau kartu ditolak ditandai dengan saran ganti kartu/metode
-      const isLimitError = /limit|maksimum|maximum|too many|batas|sampai batas|different card|different payment|kartu lain|metode pembayaran lain|kartu yang berbeda/i.test(errorText.toLowerCase());
-
-      if (isLimitError) {
-        console.warn(`[WARN] VCC Limit reached detected from message: "${errorText}"`);
-        await this.triggerPaymentLimitReached();
-      }
-
-      throw new Error(`PAYMENT_DECLINED: ${errorText}${isLimitError ? " (LIMIT_REACHED)" : ""}`);
+      throw new Error(`PAYMENT_DECLINED: ${errorText}`);
     } else if (result === null) {
       console.warn(
         "[WARN] Payment result timeout - long loading time, trigger payment saved",
@@ -1383,6 +1366,16 @@ class MicrosoftBot {
         () => this.confirmAddressIfPrompted(),
         [300, 600],
       );
+
+      if (this.accountConfig.stopPoint === "vcc_success") {
+        console.log("[INFO] Stop point reached: vcc_success. Finalizing account data...");
+        this._currentStep = "Extracting final domain account (early stop)";
+        const { domainEmail, domainPassword } =
+          await this.extractFinalDomainAccount();
+        await this.triggerPaymentSaved();
+        return { success: true, domainEmail, domainPassword };
+      }
+
       await this.executeStep(
         "Accepting trial & clicking Start",
         () => this.acceptTrialAndStart(),

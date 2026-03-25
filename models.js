@@ -27,6 +27,7 @@ const UserConfigSchema = new mongoose.Schema({
   maxAccountsPerPayment: { type: Number, default: 3 },
   proxyUsername: { type: String, default: "" },
   proxyPassword: { type: String, default: "" },
+  stopPoint: { type: String, default: "full" }, // "vcc_success" or "full"
   updatedAt: { type: Date, default: Date.now },
 });
 
