@@ -85,10 +85,10 @@ function initializeBotHandlers(bot) {
     reply_markup: {
       keyboard: [
         [{ text: "➕ Add Account" }, { text: "💳 Add VCC" }],
-        [{ text: "🚀 Generate" }, { text: "📊 Check VCC" }],
-        [{ text: "📜 History" }, { text: "⚙️ Config" }],
-        [{ text: "🧹 Reset Session" }, { text: "🗑️ Delete VCC" }],
-        [{ text: "🗑️ Delete Success" }],
+        [{ text: "🚀 Generate" }, { text: "🛑 Stop Queue" }],
+        [{ text: "📊 Check VCC" }, { text: "📜 History" }],
+        [{ text: "⚙️ Config" }, { text: "🧹 Reset Session" }],
+        [{ text: "🗑️ Delete VCC" }, { text: "🗑️ Delete Success" }],
       ],
       resize_keyboard: true,
     },
@@ -164,6 +164,26 @@ function initializeBotHandlers(bot) {
     );
   });
 
+  bot.onText(/🛑 Stop Queue/, (msg) => {
+    const chatId = msg.chat.id;
+    const session = sessions[chatId];
+    if (!session || !session.running) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ No automation is currently running.",
+        mainMenu,
+      );
+    }
+    const remaining = session.accounts.length;
+    session.accounts = []; // clear the queue so no more tasks will be started
+    session.forceStop = true;
+    bot.sendMessage(
+      chatId,
+      `🛑 Stopping... Removed ${remaining} accounts from queue. Please wait for running tasks to finish.`,
+      mainMenu,
+    );
+  });
+
   bot.onText(/🗑️ Delete Success/, async (msg) => {
     const chatId = msg.chat.id;
     await SuccessAccount.deleteMany({ telegram_id: chatId.toString() });
@@ -214,25 +234,29 @@ function initializeBotHandlers(bot) {
     const options = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "Set Microsoft URL", callback_data: `set_url` }],
+          [{ text: "🌐 Set Microsoft URL", callback_data: `set_url` }],
           [
             {
-              text: `Concurrency: ${userConf.concurrencyLimit}`,
+              text: `🚀 Concurrency: ${userConf.concurrencyLimit}`,
               callback_data: `set_concurrency`,
             },
-          ],
-          [
             {
-              text: `Max Per VCC: ${userConf.maxAccountsPerPayment}`,
+              text: `💳 Max/VCC: ${userConf.maxAccountsPerPayment}`,
               callback_data: `set_max_vcc`,
             },
           ],
-          [{ text: "Set Proxy Username", callback_data: "set_proxy_user" }],
-          [{ text: "Set Proxy Password", callback_data: "set_proxy_pass" }],
+          [
+            { text: "👤 Proxy User", callback_data: "set_proxy_user" },
+            { text: "🔑 Proxy Pass", callback_data: "set_proxy_pass" },
+          ],
           [
             {
-              text: `Stop Point: ${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}`,
+              text: `🛑 Stop: ${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}`,
               callback_data: "set_stop_point",
+            },
+            {
+              text: `🎯 Plan: ${userConf.targetPlan || "E3"}`,
+              callback_data: "set_target_plan",
             },
           ],
         ],
@@ -246,7 +270,8 @@ function initializeBotHandlers(bot) {
       `Concurrency: ${userConf.concurrencyLimit}\n` +
       `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
       `Proxy User: <code>${userConf.proxyUsername}</code>\n` +
-      `Stop Point: <b>${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}</b>`,
+      `Stop Point: <b>${userConf.stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}</b>\n` +
+      `Target Plan: <b>${userConf.targetPlan || "E3"}</b>`,
       { parse_mode: "HTML", ...options },
     );
   });
@@ -304,6 +329,23 @@ function initializeBotHandlers(bot) {
         `Stop point updated to: ${stopPoint === "vcc_success" ? "VCC Success" : "Full Step"}`,
         mainMenu,
       );
+    } else if (data === "set_target_plan") {
+      const options = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "E1", callback_data: "plan_E1" }],
+            [{ text: "E3", callback_data: "plan_E3" }],
+            [{ text: "E5", callback_data: "plan_E5" }],
+          ],
+        },
+      };
+      bot.sendMessage(chatId, "Choose the target Office 365 Plan:", options);
+    } else if (data.startsWith("plan_")) {
+      const plan = data.replace("plan_", "");
+      const userConf = await getUserConfig(chatId);
+      userConf.targetPlan = plan;
+      await userConf.save();
+      bot.sendMessage(chatId, `Target plan updated to: ${plan}`, mainMenu);
     }
   });
 
@@ -389,6 +431,7 @@ function initializeBotHandlers(bot) {
           proxyUsername: userConf.proxyUsername,
           proxyPassword: userConf.proxyPassword,
           stopPoint: userConf.stopPoint,
+          targetPlan: userConf.targetPlan,
         };
 
         // ── Capture vcc._id saja — bukan seluruh object ──────────────────────────
@@ -512,11 +555,20 @@ function initializeBotHandlers(bot) {
         );
       } finally {
         session.running = false;
-        bot.sendMessage(
-          chatId,
-          "🏁 Finished processing session accounts.",
-          mainMenu,
-        );
+        if (session.forceStop) {
+          session.forceStop = false;
+          bot.sendMessage(
+            chatId,
+            "🛑 Queue processing stopped successfully.",
+            mainMenu,
+          );
+        } else {
+          bot.sendMessage(
+            chatId,
+            "🏁 Finished processing session accounts.",
+            mainMenu,
+          );
+        }
       }
     };
 
