@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "microsoft-account",
+      name: "bot-microsoft-account",
       script: "telegram_bot.js",
       instances: 1,
       autorestart: true,
