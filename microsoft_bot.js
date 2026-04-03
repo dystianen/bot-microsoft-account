@@ -42,8 +42,8 @@ class MicrosoftBot {
     if (!text) return;
     await locator.click({ force: true }).catch(() => {});
     await this.humanDelay(100, 300);
-    // Varies typing delay between 40ms to 90ms per character to mimic speed
-    await locator.pressSequentially(text, { delay: Math.floor(Math.random() * 50) + 40 });
+    // Mimic copy-paste behavior
+    await locator.fill(text);
   }
 
   async humanClick(locator, options = {}) {
@@ -479,7 +479,7 @@ class MicrosoftBot {
       await this.humanType(emailInput, "");
       await this.humanDelay(200, 400);
       await emailInput.focus();
-      await this.page.keyboard.type(email, { delay: Math.floor(Math.random() * 50) + 40 });
+      await this.humanType(emailInput, email);
     }
 
     await this.humanDelay(800, 1500);
