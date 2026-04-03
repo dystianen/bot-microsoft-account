@@ -617,13 +617,13 @@ class MicrosoftBot {
     if (regionIsInput) {
       await this.humanType(
         regionInput,
-        this.accountConfig.microsoftAccount.state || "Alabama"
+        this.accountConfig.microsoftAccount.state
       );
       console.log("Region filled as input");
     } else {
       await this.selectDropdownByText(
         'div[role="combobox"][id*="region" i], div[role="combobox"][id*="state" i], select[id*="region" i], select[id*="state" i]',
-        this.accountConfig.microsoftAccount.state || "Alabama",
+        this.accountConfig.microsoftAccount.state,
       );
     }
 
