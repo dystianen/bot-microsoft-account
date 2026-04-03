@@ -378,7 +378,7 @@ class MicrosoftBot {
     const url = this.accountConfig.microsoftUrl || config.microsoftUrl;
     // Speed up initial navigation — wait for commit then poll for elements
     await this.page.goto(url, {
-      waitUntil: "commit",
+      waitUntil: "domcontentloaded",
       timeout: HARD_TIMEOUT,
     });
   }
@@ -645,7 +645,7 @@ class MicrosoftBot {
     const addressLocator = this.getGenericLocator("address");
     await this.waitForVisible(addressLocator);
     await addressLocator.click();
-    await this.humanType(
+    await this.humanFill(
       addressLocator,
       this.accountConfig.microsoftAccount.address,
     );
@@ -654,7 +654,7 @@ class MicrosoftBot {
     // City
     const cityLocator = this.getGenericLocator("city");
     await this.waitForVisible(cityLocator);
-    await this.humanType(cityLocator, this.accountConfig.microsoftAccount.city);
+    await this.humanFill(cityLocator, this.accountConfig.microsoftAccount.city);
     await this.humanDelay(563);
 
     const regionInput = this.page
@@ -668,7 +668,7 @@ class MicrosoftBot {
 
     await this.humanDelay(1010);
     if (regionIsInput) {
-      await this.humanType(
+      await this.humanFill(
         regionInput,
         this.accountConfig.microsoftAccount.state,
       );
@@ -696,7 +696,7 @@ class MicrosoftBot {
       try {
         await zipLocator.click();
         await this.humanDelay(980);
-        await this.humanType(
+        await this.humanFill(
           zipLocator,
           this.accountConfig.microsoftAccount.postalCode,
         );
