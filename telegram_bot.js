@@ -4,6 +4,7 @@ const { processSingleAccount } = require("./index");
 const connectDB = require("./db");
 const { SuccessAccount, VCC, UserConfig } = require("./models");
 const date = require("date-and-time");
+const adsPowerHelper = require("./adspower_helper");
 
 // Wrap in an async function to allow awaiting connection
 async function startBot() {
@@ -394,6 +395,16 @@ function initializeBotHandlers(bot) {
         "No active VCCs with balance found in database.",
       );
     }
+    
+    // --- AdsPower Connection Check ---
+    const isAdsPowerConnected = await adsPowerHelper.checkConnection();
+    if (!isAdsPowerConnected) {
+      return bot.sendMessage(
+        chatId,
+        "🚫 <b>Error:</b> AdsPower belum dibuka di VPS. Silakan buka aplikasi AdsPower terlebih dahulu dan pastikan Local API sudah aktif sebelum menjalankan bot.",
+        { parse_mode: "HTML", ...mainMenu }
+      );
+    }
 
     session.running = true;
     sessions[chatId] = session;
@@ -552,8 +563,8 @@ function initializeBotHandlers(bot) {
             pendingPromises.add(promise);
 
             if (session.accounts.length > 0 || activeWorkers < maxWorkers) {
-              console.log(`[Queue] Waiting 60s before next account...`);
-              await new Promise((r) => setTimeout(r, 60000));
+              console.log(`[Queue] Waiting 20s before next account...`);
+              await new Promise((r) => setTimeout(r, 20000));
             }
           } else if (activeWorkers === 0 && session.accounts.length === 0) {
             break;
