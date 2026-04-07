@@ -196,14 +196,29 @@ class MicrosoftBot {
     const button = this.page.getByRole("button", { name: pattern }).first();
 
     try {
-      await button.waitFor({ state: "visible", timeout: HARD_TIMEOUT });
+      await this.runWithMonitor(
+        button.waitFor({ state: "visible", timeout: HARD_TIMEOUT }),
+      );
       await this.humanClick(button, { timeout: 8000 });
       const clickedText = await button.textContent().catch(() => "unknown");
       console.log(`[INFO] Clicked: "${clickedText?.trim()}"`);
       return true;
     } catch (err) {
+      // Last ditch effort: search in all frames
+      console.log("[DEBUG] Searching for button in frames...");
+      for (const frame of this.page.frames()) {
+        try {
+          const frameButton = frame.getByRole("button", { name: pattern }).first();
+          if (await frameButton.isVisible().catch(() => false)) {
+            console.log(`[INFO] Found and clicking button in frame: ${frame.url()}`);
+            await frameButton.click();
+            return true;
+          }
+        } catch (fErr) {}
+      }
+
       const allButtons = await this.page.evaluate(() =>
-        [...document.querySelectorAll('button, [role="button"]')]
+        [...document.querySelectorAll('button, [role="button"], a[role="button"]')]
           .map((b) => b.textContent?.trim())
           .filter(Boolean),
       );
@@ -1169,9 +1184,11 @@ class MicrosoftBot {
                 text.includes("ringkasan pesanan") ||
                 text.includes("setup your account") ||
                 text.includes("siapkan akun") ||
-                text.includes("mulai") ||
+                // Avoid too generic "mulai" unless it's a specific page pattern
+                (text.includes("mulai") && (text.includes("pesanan") || text.includes("data") || text.includes("akun"))) ||
                 window.location.href.includes("ordersummary") ||
-                window.location.href.includes("setup-account")
+                window.location.href.includes("setup-account") ||
+                window.location.href.includes("review")
               );
             },
             { timeout },
@@ -1243,32 +1260,39 @@ class MicrosoftBot {
   async acceptTrialAndStart() {
     console.log("[STEP 14] Clicking Start Trial button");
 
+    const currentUrl = this.page.url();
+    if (currentUrl.includes("setup-account") || currentUrl.includes("setupaccount") || currentUrl.includes("complete")) {
+      console.log("[INFO] Detected setup-account URL, skipping click attempt.");
+      return;
+    }
+
     await this.waitForSpinnerGone(800);
 
-    // Handle checkbox
+    // Handle checkboxes - click ALL unchecked ones to be safe
     try {
-      const checkbox = this.page.locator('input[type="checkbox"]').first();
-      if (await checkbox.count()) {
-        const checked =
-          (await checkbox.getAttribute("aria-checked")) === "true" ||
-          (await checkbox.isChecked());
-        if (!checked) {
-          console.log("[INFO] Checking agreement checkbox...");
-          await this.randomMouseMove();
-          await checkbox.click({ force: true });
-          await this.humanDelay(700);
+      const checkboxes = this.page.locator('input[type="checkbox"]');
+      const count = await checkboxes.count();
+      for (let i = 0; i < count; i++) {
+        const cb = checkboxes.nth(i);
+        const name = await cb.getAttribute("name").catch(() => "");
+        const isChecked = await cb.isChecked().catch(() => false);
+        const ariaChecked = await cb.getAttribute("aria-checked").catch(() => "");
+        
+        if (!isChecked && ariaChecked !== "true") {
+          console.log(`[INFO] Clicking checkbox [${name || i}]...`);
+          await cb.click({ force: true }).catch(() => {});
+          await this.humanDelay(400);
         }
       }
     } catch (e) {
       console.log("[INFO] Checkbox handling skipped:", e.message);
     }
 
-    // Tunggu tombol enabled — pakai partial keyword, bukan exact pattern
+    // Tunggu tombol enabled
     console.log("[INFO] Waiting for Start Trial button to be enabled...");
-    await this.page
+    await this.runWithMonitor(this.page
       .waitForFunction(
         () => {
-          // ✅ Partial keywords — cukup ada salah satu kata ini
           const keywords = [
             "start",
             "trial",
@@ -1277,13 +1301,15 @@ class MicrosoftBot {
             "try",
             "now",
             "uji",
+            "selesaikan",
+            "complete",
+            "subscribe",
           ];
 
-          const btn = [...document.querySelectorAll("button")].find((b) => {
-            const text = b.textContent?.trim().toLowerCase() || "";
-            // Minimal 1 keyword cocok, dan button tidak disabled
+          const btn = [...document.querySelectorAll("button, [role='button'], a")].find((b) => {
+            const text = (b.textContent || b.value || "").trim().toLowerCase() || "";
             return (
-              keywords.some((kw) => text.includes(kw)) && text.length < 60 // Hindari false positive dari button dengan teks panjang
+              keywords.some((kw) => text.includes(kw)) && text.length > 0 && text.length < 60
             );
           });
 
@@ -1295,7 +1321,7 @@ class MicrosoftBot {
           );
         },
         { timeout: HARD_TIMEOUT },
-      )
+      ))
       .catch(() =>
         console.log("[WARN] Could not confirm button enabled, proceeding..."),
       );
@@ -1309,6 +1335,12 @@ class MicrosoftBot {
       "Start free trial",
       "Start",
       "Mulai",
+      "Selesaikan pesanan",
+      "Complete order",
+      "Submit order",
+      "Subscribe",
+      "Get started now",
+      "Try it now",
     ]);
 
     console.log("[INFO] Start Trial clicked");
@@ -1429,6 +1461,15 @@ class MicrosoftBot {
         "agar kami tahu Anda bukan robot",
         "error code",
         "715-123280",
+        "Kami mohon maaf",
+        "Silakan coba lagi",
+        "Terdapat masalah",
+        "We are sorry",
+        "Please try again",
+        "Contact support",
+        "Hubungi dukungan",
+        "Tidak dapat memproses",
+        "Could not process",
       ];
 
       for (const frame of this.page.frames()) {
