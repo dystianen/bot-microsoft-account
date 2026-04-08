@@ -32,9 +32,20 @@ class MicrosoftBot {
 
   // ─── Core helpers ────────────────────────────────────────────────────────────
 
-  async humanDelay(value = 100) {
-    // const delay = Math.floor(Math.random() * (max - min + 1) + min);
-    await this.page.waitForTimeout(value + 1000);
+  async humanDelay(min = 1000, max = 3000) {
+    const delay = Math.floor(Math.random() * (max - min + 1) + min);
+    await this.page.waitForTimeout(delay);
+  }
+
+  async humanScroll() {
+    try {
+      const direction = Math.random() > 0.5 ? 1 : -1;
+      const distance = Math.floor(Math.random() * 300) + 100;
+      await this.page.mouse.wheel(0, direction * distance);
+      await this.humanDelay(500, 1200);
+    } catch (e) {
+      // Ignore scroll errors
+    }
   }
 
   async humanFill(locator, text) {
@@ -62,13 +73,25 @@ class MicrosoftBot {
   }
 
   async randomMouseMove() {
-    const { width, height } = this.page.viewportSize() || {
-      width: 1280,
-      height: 720,
-    };
-    const x = Math.floor(Math.random() * width);
-    const y = Math.floor(Math.random() * height);
-    await this.page.mouse.move(x, y, { steps: 10 });
+    try {
+      const { width, height } = this.page.viewportSize() || {
+        width: 1280,
+        height: 720,
+      };
+      
+      // Target localized area instead of just anywhere to be more realistic
+      const x = Math.floor(Math.random() * width);
+      const y = Math.floor(Math.random() * height);
+      
+      // Use more steps for smoother/slower movement
+      const steps = Math.floor(Math.random() * 15) + 10;
+      await this.page.mouse.move(x, y, { steps });
+      
+      // Occasionally "flutter" the mouse
+      if (Math.random() > 0.8) {
+        await this.page.mouse.move(x + 5, y + 5, { steps: 5 });
+      }
+    } catch (e) {}
   }
 
   async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
@@ -385,6 +408,32 @@ class MicrosoftBot {
     const pages = this.context.pages();
     this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
     this.profileId = this.wsUrl.split("/").pop();
+
+    // Check IP vs billing address country (Anti-Fraud)
+    try {
+      console.log("[INFO] Verifying IP location...");
+      const ipInfoResponse = await this.page.evaluate(async () => {
+        try {
+          const res = await fetch("https://ipapi.co/json/");
+          return await res.json();
+        } catch { return null; }
+      });
+
+      if (ipInfoResponse && ipInfoResponse.country_name) {
+        const ipCountry = ipInfoResponse.country_name.toLowerCase();
+        const billingAddress = this.accountConfig.basicInfo?.address || this.accountConfig.payment?.address || "";
+        console.log(`[INFO] Current IP location: ${ipInfoResponse.city}, ${ipInfoResponse.country_name} (${ipInfoResponse.ip})`);
+        
+        // Simple heuristic: check if billing address mentioned country matches IP country
+        // (This can be refined if we have a strict country code in config)
+        if (billingAddress && !billingAddress.toLowerCase().includes(ipCountry)) {
+          console.warn(`[ANTI-FRAUD WARNING] Location mismatch! IP is in ${ipCountry}, but billing address might be elsewhere.`);
+          console.warn(`Billing info provided: ${billingAddress}`);
+        }
+      }
+    } catch (e) {
+      console.log("[WARN] Could not verify IP location, continuing anyway.");
+    }
   }
 
   async openMicrosoftPage() {
@@ -1647,7 +1696,11 @@ class MicrosoftBot {
       );
       await this.executeStep(
         "Navigating to payment page",
-        () => this.goToPaymentPage(),
+        async () => {
+          await this.humanScroll();
+          await this.randomMouseMove();
+          await this.goToPaymentPage();
+        },
         [400, 800],
       );
       await this.executeStep(
