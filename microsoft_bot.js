@@ -138,7 +138,7 @@ class MicrosoftBot {
     );
   }
 
-  async clickButtonWithPossibleNames(names) {
+  async clickButtonWithPossibleNames(names, timeout = HARD_TIMEOUT) {
     await this.waitForSpinnerGone();
 
     // ✅ Partial keyword matching — pecah tiap name jadi kata-katanya
@@ -197,7 +197,7 @@ class MicrosoftBot {
 
     try {
       await this.runWithMonitor(
-        button.waitFor({ state: "visible", timeout: HARD_TIMEOUT }),
+        button.waitFor({ state: "visible", timeout }),
       );
       await this.humanClick(button, { timeout: 8000 });
       const clickedText = await button.textContent().catch(() => "unknown");
@@ -1260,95 +1260,146 @@ class MicrosoftBot {
   async acceptTrialAndStart() {
     console.log("[STEP 14] Clicking Start Trial button");
 
-    const currentUrl = this.page.url();
-    if (currentUrl.includes("setup-account") || currentUrl.includes("setupaccount") || currentUrl.includes("complete")) {
-      console.log("[INFO] Detected setup-account URL, skipping click attempt.");
-      return;
-    }
-
-    await this.waitForSpinnerGone(800);
-
-    // Handle checkboxes - click ALL unchecked ones to be safe
-    try {
-      const checkboxes = this.page.locator('input[type="checkbox"]');
-      const count = await checkboxes.count();
-      for (let i = 0; i < count; i++) {
-        const cb = checkboxes.nth(i);
-        const name = await cb.getAttribute("name").catch(() => "");
-        const isChecked = await cb.isChecked().catch(() => false);
-        const ariaChecked = await cb.getAttribute("aria-checked").catch(() => "");
-        
-        if (!isChecked && ariaChecked !== "true") {
-          console.log(`[INFO] Clicking checkbox [${name || i}]...`);
-          await cb.click({ force: true }).catch(() => {});
-          await this.humanDelay(400);
-        }
-      }
-    } catch (e) {
-      console.log("[INFO] Checkbox handling skipped:", e.message);
-    }
-
-    // Tunggu tombol enabled
-    console.log("[INFO] Waiting for Start Trial button to be enabled...");
-    await this.runWithMonitor(this.page
-      .waitForFunction(
-        () => {
-          const keywords = [
-            "start",
-            "trial",
-            "mulai",
-            "coba",
-            "try",
-            "now",
-            "uji",
-            "selesaikan",
-            "complete",
-            "subscribe",
-          ];
-
-          const btn = [...document.querySelectorAll("button, [role='button'], a")].find((b) => {
-            const text = (b.textContent || b.value || "").trim().toLowerCase() || "";
-            return (
-              keywords.some((kw) => text.includes(kw)) && text.length > 0 && text.length < 60
-            );
-          });
-
-          return (
-            btn &&
-            !btn.disabled &&
-            btn.getAttribute("aria-disabled") !== "true" &&
-            !btn.classList.contains("is-disabled")
+    const maxRetries = 2;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const currentUrl = this.page.url();
+        if (
+          currentUrl.includes("setup-account") ||
+          currentUrl.includes("setupaccount") ||
+          currentUrl.includes("complete")
+        ) {
+          console.log(
+            "[INFO] Detected setup-account URL, skipping click attempt.",
           );
-        },
-        { timeout: HARD_TIMEOUT },
-      ))
-      .catch(() =>
-        console.log("[WARN] Could not confirm button enabled, proceeding..."),
-      );
+          return;
+        }
 
-    await this.clickButtonWithPossibleNames([
-      "Start trial",
-      "Mulai uji coba",
-      "Try now",
-      "Coba sekarang",
-      "Mulai percobaan",
-      "Start free trial",
-      "Start",
-      "Mulai",
-      "Selesaikan pesanan",
-      "Complete order",
-      "Submit order",
-      "Subscribe",
-      "Get started now",
-      "Try it now",
-    ]);
+        await this.waitForSpinnerGone(1000);
 
-    console.log("[INFO] Start Trial clicked");
+        // Handle checkboxes - click ALL unchecked ones to be safe
+        try {
+          const checkboxes = this.page.locator('input[type="checkbox"]');
+          const count = await checkboxes.count();
+          for (let i = 0; i < count; i++) {
+            const cb = checkboxes.nth(i);
+            const name = await cb.getAttribute("name").catch(() => "");
+            const isChecked = await cb.isChecked().catch(() => false);
+            const ariaChecked = await cb
+              .getAttribute("aria-checked")
+              .catch(() => "");
 
-    await Promise.race([
-      this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
-      this.page.waitForLoadState("networkidle").catch(() => {}),
-    ]);
+            if (!isChecked && ariaChecked !== "true") {
+              console.log(`[INFO] Clicking checkbox [${name || i}]...`);
+              await cb.click({ force: true }).catch(() => {});
+              await this.humanDelay(500);
+            }
+          }
+        } catch (e) {
+          console.log("[INFO] Checkbox handling skipped:", e.message);
+        }
+
+        // Tunggu tombol enabled
+        console.log(
+          `[INFO] Waiting for Start Trial button (Attempt ${attempt})...`,
+        );
+        const keywordsForWait = [
+          "start",
+          "trial",
+          "mulai",
+          "coba",
+          "try",
+          "now",
+          "uji",
+          "selesaikan",
+          "complete",
+          "subscribe",
+          "pesanan",
+          "order",
+          "submit",
+          "bayar",
+          "pay",
+        ];
+
+        await this.runWithMonitor(
+          this.page.waitForFunction(
+            (kws) => {
+              const btn = [
+                ...document.querySelectorAll("button, [role='button'], a"),
+              ].find((b) => {
+                const text =
+                  (b.textContent || b.value || "").trim().toLowerCase() || "";
+                return (
+                  kws.some((kw) => text.includes(kw)) &&
+                  text.length > 0 &&
+                  text.length < 60
+                );
+              });
+              return (
+                btn &&
+                !btn.disabled &&
+                btn.getAttribute("aria-disabled") !== "true" &&
+                !btn.classList.contains("is-disabled")
+              );
+            },
+            keywordsForWait,
+            { timeout: attempt === 1 ? 30000 : 45000 },
+          ),
+        ).catch(() =>
+          console.log("[WARN] Button not confirmed enabled, will try anyway."),
+        );
+
+        await this.clickButtonWithPossibleNames(
+          [
+            "Start trial",
+            "Mulai uji coba",
+            "Try now",
+            "Coba sekarang",
+            "Mulai percobaan",
+            "Start free trial",
+            "Start",
+            "Mulai",
+            "Selesaikan pesanan",
+            "Complete order",
+            "Submit order",
+            "Subscribe",
+            "Get started now",
+            "Try it now",
+            "Pay now",
+            "Bayar sekarang",
+          ],
+          attempt === 1 ? 40000 : 60000,
+        );
+
+        console.log("[INFO] Start Trial clicked successfully");
+
+        await Promise.race([
+          this.page.waitForNavigation({ timeout: 20000 }).catch(() => {}),
+          this.page
+            .waitForLoadState("networkidle", { timeout: 20000 })
+            .catch(() => {}),
+          this.page
+            .waitForURL(/setup-account|complete/i, { timeout: 20000 })
+            .catch(() => {}),
+        ]);
+
+        return; // Success
+      } catch (e) {
+        if (attempt === maxRetries) throw e;
+
+        console.warn(
+          `[WARN] Step 14 failed (attempt ${attempt}/${maxRetries}): ${e.message}`,
+        );
+
+        // If it's a timeout or other error, try reloading
+        console.log(
+          "[INFO] Reloading page to recover from potential UI hang...",
+        );
+        await this.page.reload().catch(() => {});
+        await this.waitForSpinnerGone(2000);
+        await this.humanDelay(2000);
+      }
+    }
   }
 
   async clickGetStartedButton() {
