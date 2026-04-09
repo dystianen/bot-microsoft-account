@@ -567,6 +567,49 @@ class MicrosoftBot {
 
   async clickProductNextButton() {
     await this._logStep(4, "Mengklik tombol Selanjutnya...");
+
+    // Pilih "1 month" jika opsi durasi langganan muncul (mendukung multi-bahasa)
+    try {
+      const oneMonthSelectors = [
+        'label:has-text("1 month")',
+        'label:has-text("1 bulan")',
+        'label:has-text("1 mes")',
+        'label:has-text("1 mois")',
+        'label:has-text("1 Monat")',
+        'label:has-text("1 mese")',
+        'label:has-text("1 mês")',
+        'span:has-text("1 month")',
+        'span:has-text("1 bulan")',
+        'span:has-text("1 mes")',
+        'span:has-text("1 mois")',
+        'span:has-text("1 Monat")',
+        '[aria-label*="1 month" i]',
+        '[aria-label*="1 bulan" i]',
+        'input[value*="month" i]',
+        'input[value*="bulan" i]',
+      ].join(", ");
+
+      const oneMonthOption = this.page.locator(oneMonthSelectors).first();
+
+      const isVisible = await oneMonthOption
+        .isVisible({ timeout: 8000 })
+        .catch(() => false);
+      if (isVisible) {
+        console.log(
+          "[STEP 4] Subscription length option detected. Selecting 1 month...",
+        );
+        await this.randomMouseMove();
+        await oneMonthOption.click({ force: true });
+        await this.humanDelay(1500);
+      } else {
+        console.log(
+          "[STEP 4] 1 month option not detected or not visible, proceeding.",
+        );
+      }
+    } catch (e) {
+      console.log("[STEP 4] 1 month selection logic skipped:", e.message);
+    }
+
     await this.clickButtonWithPossibleNames([
       "Next",
       "Selanjutnya",
