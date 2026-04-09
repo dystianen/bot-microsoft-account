@@ -11,13 +11,14 @@ class RemoteLogger {
   }
 
   async _enqueue(action) {
+    // FIX: chain dengan benar sesuai pola di Microsoft Teams
     const promise = this.queue.then(async () => {
       try {
         await action();
       } catch (err) {
         console.error(`[RemoteLogger] Action failed: ${err.message}`);
       }
-      await new Promise((r) => setTimeout(r, 450));
+      await new Promise((r) => setTimeout(r, 500)); // Buffer sedikit lebih besar
     });
     this.queue = promise;
     return promise;
@@ -29,14 +30,17 @@ class RemoteLogger {
         const res = await axios.post(
           `https://api.telegram.org/bot${this.token}/${endpoint}`,
           payload,
+          { timeout: 15000 } // Tambahkan timeout agar tidak hang selamanya
         );
         return res;
       } catch (err) {
         const status = err.response?.status;
         const desc = err.response?.data?.description || "";
 
+        // Rate limited — beri info di console agar user tahu bot tidak mati
         if (status === 429) {
           const retryAfter = (err.response?.data?.parameters?.retry_after || 5) * 1000;
+          console.warn(`[RemoteLogger] Rate limited, waiting ${retryAfter}ms (Attempt ${attempt})`);
           await new Promise((r) => setTimeout(r, retryAfter));
           continue;
         }
@@ -99,7 +103,10 @@ class RemoteLogger {
       const truncated = text.substring(0, 4000);
 
       try {
-        if (messageId && messageId !== "pending") {
+        if (messageId) {
+          // Sudah ada message sebelumnya — edit saja (termasuk status "pending")
+          // Jika messageId adalah "pending", edit ini akan gagal di Telegram (expected)
+          // dan masuk ke block catch untuk kirim baru.
           await this._post("editMessageText", {
             chat_id: this.chatId,
             message_id: messageId,
@@ -122,6 +129,7 @@ class RemoteLogger {
           }
         }
       } catch (err) {
+        // Edit gagal (message dihapus manual atau messageId="pending") — reset dan kirim baru
         this.sessionMap.delete(email);
         const resp = await this._post("sendMessage", {
           chat_id: this.chatId,

@@ -24,7 +24,10 @@ class MicrosoftBot {
   async _logStep(stepNum, msg) {
     this.currentStep = stepNum;
     const email = this.accountConfig.microsoftAccount.email;
-    await remoteLogger.logStep(email, stepNum, msg);
+    // JANGAN di-await agar bot tidak berhenti/hang jika antrean log Telegram menumpuk
+    remoteLogger.logStep(email, stepNum, msg).catch((e) => 
+      console.error(`[LOG ERROR] ${e.message}`)
+    );
   }
 
   async triggerPaymentSaved() {
@@ -397,7 +400,7 @@ class MicrosoftBot {
   // ─── Steps ───────────────────────────────────────────────────────────────────
 
   async connect() {
-    await this._logStep(1, "Menghubungkan ke browser...");
+    await this._logStep(1, "🌐 Menghubungkan ke browser...");
 
     this.browser = await Promise.race([
       chromium.connectOverCDP(this.wsUrl),
@@ -445,7 +448,7 @@ class MicrosoftBot {
   }
 
   async openMicrosoftPage() {
-    await this._logStep(2, "Membuka halaman Microsoft...");
+    await this._logStep(2, "🌍 Membuka halaman Microsoft...");
 
     const url = this.accountConfig.microsoftUrl || config.microsoftUrl;
     // Speed up initial navigation — wait for commit then poll for elements
