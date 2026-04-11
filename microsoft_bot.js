@@ -756,11 +756,29 @@ class MicrosoftBot {
   async clickSetupAccountButton() {
     await this._logStep(7, "Mengklik tombol Setup Account...");
     await this.clickButtonWithPossibleNames([
+      // Setup Account variants
       "Setup Account",
       "Setup",
       "Set up",
       "Atur Akun",
       "Siapkan Akun",
+
+      // "Create new account" — muncul saat email sudah punya akun kerja/sekolah
+      // (halaman "Let's get you started")
+      "Create new account",
+      "Create account",
+      "Buat akun baru",
+      "Buat akun",
+
+      // Bahasa lain (Spanyol, Prancis, Jerman, Italia, Portugis)
+      "Crear cuenta nueva",
+      "Crear cuenta",
+      "Créer un compte",
+      "Neues Konto erstellen",
+      "Crea nuovo account",
+      "Criar nova conta",
+
+      // Generic fallback
       "Mulai",
     ]);
     this._setupBtnReady = false;
