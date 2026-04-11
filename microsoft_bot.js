@@ -66,6 +66,35 @@ class MicrosoftBot {
     await locator.fill(text);
   }
 
+  // Clipboard paste — lebih cepat & tidak terpengaruh proxy/lag
+  async humanPaste(locator, text) {
+    if (!text) return;
+    await locator.click({ force: true }).catch(() => {});
+    await this.humanDelay(200);
+    await locator.fill(""); // clear dulu
+    await this.humanDelay(100);
+    await this.page.evaluate((val) => {
+      const el = document.activeElement;
+      if (el) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(el, val);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    }, text);
+    // Verifikasi hasil paste
+    const current = await locator.inputValue().catch(() => "");
+    if (current !== text) {
+      // Fallback ke fill biasa jika paste gagal
+      await locator.fill(text);
+    }
+  }
+
   async humanType(locator, text) {
     if (!text) return;
     await locator.click({ force: true }).catch(() => {});
@@ -111,16 +140,26 @@ class MicrosoftBot {
 
     const checkLoop = async () => {
       while (!isDone) {
-        await this.page.waitForTimeout(2000).catch(() => {
+        await this.page.waitForTimeout(2500).catch(() => {
           isDone = true;
         });
         if (isDone) break;
 
         const detectedError = await this.checkForError();
         if (detectedError) {
-          errorMsg = detectedError;
-          isDone = true;
-          break;
+          // ✅ Double-check: tunggu 2 detik lagi, lalu cek ulang sebelum throw
+          // Ini mencegah false-positive saat teks error muncul sementara (transisi halaman)
+          console.log(`[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`);
+          await this.page.waitForTimeout(2000).catch(() => {});
+          if (isDone) break; // Task selesai duluan, abaikan
+          const recheck = await this.checkForError();
+          if (recheck) {
+            errorMsg = recheck;
+            isDone = true;
+            break;
+          } else {
+            console.log(`[MONITOR] False positive cleared, continuing...`);
+          }
         }
       }
     };
@@ -662,7 +701,20 @@ class MicrosoftBot {
     ]);
 
     console.log("[INFO] Waiting for Setup button...");
-    const setupBtn = this.getGenericButton("Setup");
+
+    // ✅ Selector lebih luas: tangkap berbagai varian teks Setup tombol
+    const setupBtnSelector = [
+      'button[id*="Setup" i], button[data-testid*="Setup" i], button[data-bi-id*="Setup" i]',
+      'a[data-bi-id*="Setup" i]',
+      'button:has-text("Setup")',
+      'button:has-text("Set up")',
+      'a:has-text("Setup")',
+      'button:has-text("Atur")',
+      'button:has-text("Siapkan")',
+      'button:has-text("Mulai")',
+    ].join(", ");
+
+    const setupBtn = this.page.locator(setupBtnSelector).first();
 
     const start = Date.now();
     const interval = setInterval(() => {
@@ -672,7 +724,29 @@ class MicrosoftBot {
     }, 15000);
 
     try {
-      await this.waitWithCheck(setupBtn, HARD_TIMEOUT);
+      // ✅ Retry loop: cek apakah halaman berpindah ke step lain (skip Setup)
+      const deadline = Date.now() + HARD_TIMEOUT;
+      let found = false;
+      while (Date.now() < deadline && !found) {
+        found = await setupBtn.isVisible({ timeout: 5000 }).catch(() => false);
+        if (!found) {
+          // Cek apakah sudah langsung masuk ke form basic info (Setup skipped)
+          const basicInfoVisible = await this.page
+            .locator('input[id*="first" i], input[id*="firstName" i]')
+            .first()
+            .isVisible({ timeout: 2000 })
+            .catch(() => false);
+          if (basicInfoVisible) {
+            console.log("[INFO] Basic info form detected, Setup step skipped by Microsoft.");
+            this._setupBtnReady = false;
+            return;
+          }
+          const err = await this.checkForError();
+          if (err) throw new Error(`MICROSOFT_ERROR: ${err}`);
+          await this.humanDelay(2000);
+        }
+      }
+      if (!found) throw new Error("Timeout waiting for Setup button");
       this._setupBtnReady = true;
     } finally {
       clearInterval(interval);
@@ -697,38 +771,32 @@ class MicrosoftBot {
 
     await this.waitWithCheck(this.getGenericLocator("first"), HARD_TIMEOUT);
 
-    // Helper delay
-    const typeDelay = { delay: Math.floor(Math.random() * 20) + 30 };
-
-    // Row 1: First name
+    // Row 1: First name — pakai paste agar tidak kena proxy lag
     const firstLocator = this.getGenericLocator("first");
     await this.waitForVisible(firstLocator);
-    await firstLocator.click();
-    await this.humanFill(
+    await this.humanPaste(
       firstLocator,
       this.accountConfig.microsoftAccount.firstName,
     );
-    await this.humanDelay(500);
+    await this.humanDelay(400);
 
     // Last name
     const lastLocator = this.getGenericLocator("last");
     await this.waitForVisible(lastLocator);
-    await lastLocator.click();
-    await this.humanFill(
+    await this.humanPaste(
       lastLocator,
       this.accountConfig.microsoftAccount.lastName,
     );
-    await this.humanDelay(1800);
+    await this.humanDelay(500);
 
     // Company
     const companyLocator = this.getGenericLocator("company");
     await this.waitForVisible(companyLocator);
-    await companyLocator.click();
-    await this.humanFill(
+    await this.humanPaste(
       companyLocator,
       this.accountConfig.microsoftAccount.companyName,
     );
-    await this.humanDelay(600);
+    await this.humanDelay(400);
 
     // Company size
     await this.selectDropdownByText(
@@ -737,41 +805,38 @@ class MicrosoftBot {
     );
     await this.humanDelay(650);
 
-    // Phone
+    // Phone — pakai paste
     const phoneLocator = this.getGenericLocator("phone");
     await this.waitForVisible(phoneLocator);
-    await phoneLocator.click();
-    await this.humanFill(
+    await this.humanPaste(
       phoneLocator,
       this.accountConfig.microsoftAccount.phone,
     );
     await this.humanDelay(300);
 
-    // Job
+    // Job — pakai paste
     const jobLocator = this.getGenericLocator("job");
     await this.waitForVisible(jobLocator);
-    await jobLocator.click();
-    await this.humanType(
+    await this.humanPaste(
       jobLocator,
       this.accountConfig.microsoftAccount.jobTitle,
     );
-    await this.humanDelay(1230);
+    await this.humanDelay(500);
 
-    // Address 1
+    // Address 1 — pakai paste
     const addressLocator = this.getGenericLocator("address");
     await this.waitForVisible(addressLocator);
-    await addressLocator.click();
-    await this.humanFill(
+    await this.humanPaste(
       addressLocator,
       this.accountConfig.microsoftAccount.address,
     );
-    await this.humanDelay(425);
+    await this.humanDelay(400);
 
-    // City
+    // City — pakai paste
     const cityLocator = this.getGenericLocator("city");
     await this.waitForVisible(cityLocator);
-    await this.humanFill(cityLocator, this.accountConfig.microsoftAccount.city);
-    await this.humanDelay(563);
+    await this.humanPaste(cityLocator, this.accountConfig.microsoftAccount.city);
+    await this.humanDelay(400);
 
     const regionInput = this.page
       .locator('input[id*="region" i], input[id*="state" i]')
@@ -798,7 +863,7 @@ class MicrosoftBot {
 
     await this.humanDelay(613);
 
-    // 🔥 POSTAL (BALIKIN locator lama)
+    // 🔥 POSTAL — pakai paste
     const zipLocator = this.page
       .locator(
         'input[id*="postal" i], input[id*="zip" i], input[data-testid*="postal" i], input[data-testid*="zip" i]',
@@ -810,14 +875,12 @@ class MicrosoftBot {
       (await zipLocator.count()) > 0
     ) {
       try {
-        await zipLocator.click();
-        await this.humanDelay(980);
-        await this.humanFill(
+        await this.humanPaste(
           zipLocator,
           this.accountConfig.microsoftAccount.postalCode,
         );
         console.log("Postal filled");
-        await this.humanDelay(2000);
+        await this.humanDelay(1000);
       } catch {
         console.log("Postal found but failed to fill");
       }
@@ -967,27 +1030,42 @@ class MicrosoftBot {
       )
       .first();
 
-    await this.humanDelay(306);      
+    await this.humanDelay(306);
     const confirmPasswordLocator = this.page
       .locator('input[type="password"]')
       .nth(1);
 
     await this.waitForVisible(passwordLocator);
     await this.randomMouseMove();
+
+    // ✅ Password: gunakan humanType (mengetik) — password harus terlihat natural
+    // Sebagian form Microsoft menolak paste/fill pada field password karena ada validasi khusus
     await passwordLocator.click({ force: true }).catch(() => {});
-    await this.humanDelay(723);
+    await this.humanDelay(500);
     await this.humanType(
       passwordLocator,
       this.accountConfig.microsoftAccount.password,
     );
 
-    await this.humanDelay(819);
-    await confirmPasswordLocator.click({ force: true }).catch(() => {});
-    await this.humanType(
-      confirmPasswordLocator,
-      this.accountConfig.microsoftAccount.password,
-    );
-    await this.humanDelay(609);
+    // Verifikasi isi password (jika terdeteksi kosong, coba paste fallback)
+    const pwdVal = await passwordLocator.inputValue().catch(() => "");
+    if (!pwdVal) {
+      console.warn("[WARN] Password field appears empty after typing, trying fill fallback...");
+      await passwordLocator.fill(this.accountConfig.microsoftAccount.password);
+    }
+
+    await this.humanDelay(700);
+    const confirmVisible = await confirmPasswordLocator
+      .isVisible({ timeout: 5000 })
+      .catch(() => false);
+    if (confirmVisible) {
+      await confirmPasswordLocator.click({ force: true }).catch(() => {});
+      await this.humanType(
+        confirmPasswordLocator,
+        this.accountConfig.microsoftAccount.password,
+      );
+    }
+    await this.humanDelay(500);
 
     await this.clickButtonWithPossibleNames([
       "Next",
@@ -1602,13 +1680,21 @@ await this._logStep(14, "Menyetujui trial dan memulai...");
     console.log(`[STEP] ${name}`);
     this._currentStep = name;
     await fn();
-    // Tunggu spinner hilang & cek error secara otomatis setelah setiap step
+    // Tunggu spinner hilang
     await this.waitForSpinnerGone();
-    const stepError = await this.checkForError();
-    if (stepError) {
-      throw new Error(
-        `MICROSOFT_ERROR: ${stepError} (Detected after step "${name}")`,
-      );
+    // ✅ Double-check error: beri jeda 1.5 detik lalu cek ulang
+    // Ini mencegah false-positive dari teks error yang muncul sementara saat transisi halaman
+    const firstCheck = await this.checkForError();
+    if (firstCheck) {
+      console.log(`[executeStep] Possible error after "${name}": "${firstCheck}", re-checking in 1.5s...`);
+      await this.humanDelay(1500);
+      const recheck = await this.checkForError();
+      if (recheck) {
+        throw new Error(
+          `MICROSOFT_ERROR: ${recheck} (Detected after step "${name}")`,
+        );
+      }
+      console.log(`[executeStep] False positive cleared after re-check.`);
     }
     if (delay) await this.humanDelay(...delay);
   }
