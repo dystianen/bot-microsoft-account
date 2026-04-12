@@ -782,9 +782,11 @@ class MicrosoftBot {
     await this._logStep(7, "Mengklik tombol Setup Account...");
     await this.clickButtonWithPossibleNames([
       // Setup Account variants
+      "Set up account",
       "Setup Account",
       "Setup",
       "Set up",
+      "Siapkan akun",
       "Atur Akun",
       "Siapkan Akun",
 
