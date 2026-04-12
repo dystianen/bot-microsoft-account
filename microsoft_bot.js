@@ -1078,39 +1078,29 @@ class MicrosoftBot {
       )
       .first();
 
-    await this.humanDelay(306);
-    const confirmPasswordLocator = this.page
-      .locator('input[type="password"]')
-      .nth(1);
-
     await this.waitForVisible(passwordLocator);
     await this.randomMouseMove();
 
-    // ✅ Password: gunakan humanType (mengetik) — password harus terlihat natural
-    // Sebagian form Microsoft menolak paste/fill pada field password karena ada validasi khusus
+    // ✅ Password: gunakan humanPaste (copas) agar lebih stabil terhadap lag/proxy
+    // Sama seperti yang dilakukan pada pengisian biodata sebelumnya
     await passwordLocator.click({ force: true }).catch(() => {});
-    await this.humanDelay(500);
-    await this.humanType(
+    await this.humanDelay(300);
+    await this.humanPaste(
       passwordLocator,
       this.accountConfig.microsoftAccount.password,
     );
 
-    // Verifikasi isi password (jika terdeteksi kosong, coba paste fallback)
-    const pwdVal = await passwordLocator.inputValue().catch(() => "");
-    if (!pwdVal) {
-      console.warn(
-        "[WARN] Password field appears empty after typing, trying fill fallback...",
-      );
-      await passwordLocator.fill(this.accountConfig.microsoftAccount.password);
-    }
-
     await this.humanDelay(700);
+    const confirmPasswordLocator = this.page
+      .locator('input[type="password"]')
+      .nth(1);
+
     const confirmVisible = await confirmPasswordLocator
       .isVisible({ timeout: 5000 })
       .catch(() => false);
     if (confirmVisible) {
       await confirmPasswordLocator.click({ force: true }).catch(() => {});
-      await this.humanType(
+      await this.humanPaste(
         confirmPasswordLocator,
         this.accountConfig.microsoftAccount.password,
       );
