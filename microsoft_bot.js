@@ -25,9 +25,9 @@ class MicrosoftBot {
     this.currentStep = stepNum;
     const email = this.accountConfig.microsoftAccount.email;
     // JANGAN di-await agar bot tidak berhenti/hang jika antrean log Telegram menumpuk
-    remoteLogger.logStep(email, stepNum, msg).catch((e) => 
-      console.error(`[LOG ERROR] ${e.message}`)
-    );
+    remoteLogger
+      .logStep(email, stepNum, msg)
+      .catch((e) => console.error(`[LOG ERROR] ${e.message}`));
   }
 
   async triggerPaymentSaved() {
@@ -76,14 +76,17 @@ class MicrosoftBot {
     await this.page.evaluate((val) => {
       const el = document.activeElement;
       if (el) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          "value",
+        )?.set;
         if (nativeInputValueSetter) {
           nativeInputValueSetter.call(el, val);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
         } else {
           el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event("input", { bubbles: true }));
         }
       }
     }, text);
@@ -118,15 +121,15 @@ class MicrosoftBot {
         width: 1280,
         height: 720,
       };
-      
+
       // Target localized area instead of just anywhere to be more realistic
       const x = Math.floor(Math.random() * width);
       const y = Math.floor(Math.random() * height);
-      
+
       // Use more steps for smoother/slower movement
       const steps = Math.floor(Math.random() * 15) + 10;
       await this.page.mouse.move(x, y, { steps });
-      
+
       // Occasionally "flutter" the mouse
       if (Math.random() > 0.8) {
         await this.page.mouse.move(x + 5, y + 5, { steps: 5 });
@@ -149,7 +152,9 @@ class MicrosoftBot {
         if (detectedError) {
           // ✅ Double-check: tunggu 2 detik lagi, lalu cek ulang sebelum throw
           // Ini mencegah false-positive saat teks error muncul sementara (transisi halaman)
-          console.log(`[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`);
+          console.log(
+            `[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`,
+          );
           await this.page.waitForTimeout(2000).catch(() => {});
           if (isDone) break; // Task selesai duluan, abaikan
           const recheck = await this.checkForError();
@@ -269,9 +274,7 @@ class MicrosoftBot {
     const button = this.page.getByRole("button", { name: pattern }).first();
 
     try {
-      await this.runWithMonitor(
-        button.waitFor({ state: "visible", timeout }),
-      );
+      await this.runWithMonitor(button.waitFor({ state: "visible", timeout }));
       await this.humanClick(button, { timeout: 8000 });
       const clickedText = await button.textContent().catch(() => "unknown");
       console.log(`[INFO] Clicked: "${clickedText?.trim()}"`);
@@ -281,9 +284,13 @@ class MicrosoftBot {
       console.log("[DEBUG] Searching for button in frames...");
       for (const frame of this.page.frames()) {
         try {
-          const frameButton = frame.getByRole("button", { name: pattern }).first();
+          const frameButton = frame
+            .getByRole("button", { name: pattern })
+            .first();
           if (await frameButton.isVisible().catch(() => false)) {
-            console.log(`[INFO] Found and clicking button in frame: ${frame.url()}`);
+            console.log(
+              `[INFO] Found and clicking button in frame: ${frame.url()}`,
+            );
             await frameButton.click();
             return true;
           }
@@ -291,7 +298,11 @@ class MicrosoftBot {
       }
 
       const allButtons = await this.page.evaluate(() =>
-        [...document.querySelectorAll('button, [role="button"], a[role="button"]')]
+        [
+          ...document.querySelectorAll(
+            'button, [role="button"], a[role="button"]',
+          ),
+        ]
           .map((b) => b.textContent?.trim())
           .filter(Boolean),
       );
@@ -466,18 +477,30 @@ class MicrosoftBot {
         try {
           const res = await fetch("https://ipapi.co/json/");
           return await res.json();
-        } catch { return null; }
+        } catch {
+          return null;
+        }
       });
 
       if (ipInfoResponse && ipInfoResponse.country_name) {
         const ipCountry = ipInfoResponse.country_name.toLowerCase();
-        const billingAddress = this.accountConfig.basicInfo?.address || this.accountConfig.payment?.address || "";
-        console.log(`[INFO] Current IP location: ${ipInfoResponse.city}, ${ipInfoResponse.country_name} (${ipInfoResponse.ip})`);
-        
+        const billingAddress =
+          this.accountConfig.basicInfo?.address ||
+          this.accountConfig.payment?.address ||
+          "";
+        console.log(
+          `[INFO] Current IP location: ${ipInfoResponse.city}, ${ipInfoResponse.country_name} (${ipInfoResponse.ip})`,
+        );
+
         // Simple heuristic: check if billing address mentioned country matches IP country
         // (This can be refined if we have a strict country code in config)
-        if (billingAddress && !billingAddress.toLowerCase().includes(ipCountry)) {
-          console.warn(`[ANTI-FRAUD WARNING] Location mismatch! IP is in ${ipCountry}, but billing address might be elsewhere.`);
+        if (
+          billingAddress &&
+          !billingAddress.toLowerCase().includes(ipCountry)
+        ) {
+          console.warn(
+            `[ANTI-FRAUD WARNING] Location mismatch! IP is in ${ipCountry}, but billing address might be elsewhere.`,
+          );
           console.warn(`Billing info provided: ${billingAddress}`);
         }
       }
@@ -737,7 +760,9 @@ class MicrosoftBot {
             .isVisible({ timeout: 2000 })
             .catch(() => false);
           if (basicInfoVisible) {
-            console.log("[INFO] Basic info form detected, Setup step skipped by Microsoft.");
+            console.log(
+              "[INFO] Basic info form detected, Setup step skipped by Microsoft.",
+            );
             this._setupBtnReady = false;
             return;
           }
@@ -853,7 +878,10 @@ class MicrosoftBot {
     // City — pakai paste
     const cityLocator = this.getGenericLocator("city");
     await this.waitForVisible(cityLocator);
-    await this.humanPaste(cityLocator, this.accountConfig.microsoftAccount.city);
+    await this.humanPaste(
+      cityLocator,
+      this.accountConfig.microsoftAccount.city,
+    );
     await this.humanDelay(400);
 
     const regionInput = this.page
@@ -1068,7 +1096,9 @@ class MicrosoftBot {
     // Verifikasi isi password (jika terdeteksi kosong, coba paste fallback)
     const pwdVal = await passwordLocator.inputValue().catch(() => "");
     if (!pwdVal) {
-      console.warn("[WARN] Password field appears empty after typing, trying fill fallback...");
+      console.warn(
+        "[WARN] Password field appears empty after typing, trying fill fallback...",
+      );
       await passwordLocator.fill(this.accountConfig.microsoftAccount.password);
     }
 
@@ -1382,7 +1412,10 @@ class MicrosoftBot {
                 text.includes("setup your account") ||
                 text.includes("siapkan akun") ||
                 // Avoid too generic "mulai" unless it's a specific page pattern
-                (text.includes("mulai") && (text.includes("pesanan") || text.includes("data") || text.includes("akun"))) ||
+                (text.includes("mulai") &&
+                  (text.includes("pesanan") ||
+                    text.includes("data") ||
+                    text.includes("akun"))) ||
                 window.location.href.includes("ordersummary") ||
                 window.location.href.includes("setup-account") ||
                 window.location.href.includes("review")
@@ -1455,63 +1488,75 @@ class MicrosoftBot {
   }
 
   async acceptTrialAndStart() {
-await this._logStep(14, "Menyetujui trial dan memulai...");
+    await this._logStep(14, "Menyetujui trial dan memulai...");
 
-    await this.waitForSpinnerGone(800);
+    // ✅ Tunggu halaman transisi dan spinner benar-benar hilang
+    await this.page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {});
+    await this.waitForSpinnerGone(1500);
+    await this.page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
-    // Handle checkbox
+    // Handle checkbox (Agreement)
     try {
-      const checkbox = this.page.locator('input[type="checkbox"]').first();
+      const checkboxSelectors = [
+        'input[type="checkbox"]',
+        '[role="checkbox"]',
+        '.ms-Checkbox-input',
+        '#agreement-checkbox',
+      ];
+      
+      const checkbox = this.page.locator(checkboxSelectors.join(", ")).first();
       if (await checkbox.count()) {
-        const checked =
-          (await checkbox.getAttribute("aria-checked")) === "true" ||
-          (await checkbox.isChecked());
-        if (!checked) {
+        const isChecked = await checkbox.evaluate(el => {
+          return el.checked || el.getAttribute("aria-checked") === "true" || el.classList.contains("is-checked");
+        }).catch(() => false);
+
+        if (!isChecked) {
           console.log("[INFO] Checking agreement checkbox...");
           await this.randomMouseMove();
-          await checkbox.click({ force: true });
-          await this.humanDelay(700);
+          await checkbox.click({ force: true }).catch(() => {});
+          await this.humanDelay(800);
         }
       }
     } catch (e) {
-      console.log("[INFO] Checkbox handling skipped:", e.message);
+      console.log("[INFO] Checkbox handling skipped/failed:", e.message);
     }
 
-    // Tunggu tombol enabled — pakai partial keyword, bukan exact pattern
-    console.log("[INFO] Waiting for Start Trial button to be enabled...");
+    // Tunggu tombol enabled — pakai partial keyword yang lebih luas
+    console.log("[INFO] Waiting for Start Trial/Order button to be enabled...");
     await this.page
       .waitForFunction(
         () => {
-          // ✅ Partial keywords — cukup ada salah satu kata ini
           const keywords = [
-            "start",
-            "trial",
-            "mulai",
-            "coba",
-            "try",
-            "now",
-            "uji",
+            "start", "trial", "mulai", "coba", "try", "now", "uji", 
+            "order", "pesan", "checkout", "buy", "beli", "place", "setup",
+            "subscribe", "langganan", "confirm", "konfirmasi"
           ];
 
-          const btn = [...document.querySelectorAll("button")].find((b) => {
-            const text = b.textContent?.trim().toLowerCase() || "";
-            // Minimal 1 keyword cocok, dan button tidak disabled
+          const candidates = [...document.querySelectorAll('button, [role="button"], a[role="button"], input[type="submit"]')];
+          const btn = candidates.find((b) => {
+            const text = (b.textContent || b.value || b.getAttribute("aria-label") || "").trim().toLowerCase();
             return (
-              keywords.some((kw) => text.includes(kw)) && text.length < 60 // Hindari false positive dari button dengan teks panjang
+              keywords.some((kw) => text.includes(kw)) && text.length > 0 && text.length < 60
             );
           });
 
-          return (
-            btn &&
-            !btn.disabled &&
-            btn.getAttribute("aria-disabled") !== "true" &&
-            !btn.classList.contains("is-disabled")
-          );
+          if (!btn) return false;
+
+          const isEnabled = !btn.disabled && 
+                            btn.getAttribute("aria-disabled") !== "true" && 
+                            !btn.classList.contains("is-disabled") &&
+                            !btn.classList.contains("ms-Button--disabled");
+          
+          // Pastikan juga terlihat (tidak hidden)
+          const style = window.getComputedStyle(btn);
+          const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+
+          return isEnabled && isVisible;
         },
-        { timeout: HARD_TIMEOUT },
+        { timeout: 45000 }, // Cukup 45 detik untuk nunggu tombol muncul/enabled
       )
       .catch(() =>
-        console.log("[WARN] Could not confirm button enabled, proceeding..."),
+        console.log("[WARN] Could not confirm button enabled, proceeding anyway..."),
       );
 
     await this.clickButtonWithPossibleNames([
@@ -1523,6 +1568,13 @@ await this._logStep(14, "Menyetujui trial dan memulai...");
       "Start free trial",
       "Start",
       "Mulai",
+      "Place order",
+      "Pesan sekarang",
+      "Order now",
+      "Checkout",
+      "Selesaikan pesanan",
+      "Confirm",
+      "Konfirmasi"
     ]);
 
     console.log("[INFO] Start Trial clicked");
@@ -1704,7 +1756,9 @@ await this._logStep(14, "Menyetujui trial dan memulai...");
     // Ini mencegah false-positive dari teks error yang muncul sementara saat transisi halaman
     const firstCheck = await this.checkForError();
     if (firstCheck) {
-      console.log(`[executeStep] Possible error after "${name}": "${firstCheck}", re-checking in 1.5s...`);
+      console.log(
+        `[executeStep] Possible error after "${name}": "${firstCheck}", re-checking in 1.5s...`,
+      );
       await this.humanDelay(1500);
       const recheck = await this.checkForError();
       if (recheck) {
