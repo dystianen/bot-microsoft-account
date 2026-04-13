@@ -646,6 +646,15 @@ class MicrosoftBot {
     // Pilih "1 month" jika opsi durasi langganan muncul (mendukung multi-bahasa)
     try {
       const oneMonthSelectors = [
+        // Menargetkan wrapper yang berisi teks "1 month" (Sangat Aman untuk Fluent UI)
+        '.ms-ChoiceField-wrapper:has-text("1 month")',
+        '.ms-ChoiceField-wrapper:has-text("1 bulan")',
+
+        // Berdasarkan aria-label pada input (Sesuai snippet Anda)
+        'input[aria-label*="1 month" i]',
+        'input[aria-label*="1 bulan" i]',
+
+        // Selector fallback yang sudah ada
         'label:has-text("1 month")',
         'label:has-text("1 bulan")',
         'label:has-text("1 mes")',
@@ -661,7 +670,6 @@ class MicrosoftBot {
         '[aria-label*="1 month" i]',
         '[aria-label*="1 bulan" i]',
         'input[value*="month" i]',
-        'input[value*="bulan" i]',
       ].join(", ");
 
       const oneMonthOption = this.page.locator(oneMonthSelectors).first();
