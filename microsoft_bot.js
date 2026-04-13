@@ -1762,8 +1762,6 @@ class MicrosoftBot {
       const captchaIndicators = [
         'button:has-text("solve the puzzle")',
         'h2:has-text("Protecting your account")',
-        'iframe[title*="Arkose" i]',
-        'iframe[src*="arkose" i]',
       ];
 
       for (const selector of captchaIndicators) {
