@@ -4,7 +4,7 @@ const config = require("./config");
 const remoteLogger = require("./remote_logger");
 
 const SPINNER_SELECTOR =
-  '[data-testid="spinner"], .ms-Spinner, [class*="spinner" i], .loader';
+  '[data-testid="spinner"], .ms-Spinner, [class*="spinner" i]';
 
 // Safety net — sangat besar, hanya untuk mencegah hang selamanya
 const HARD_TIMEOUT = 1.5 * 60 * 1000; // 1 menit 30 detik
