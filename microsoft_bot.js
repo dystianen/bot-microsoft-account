@@ -1781,7 +1781,7 @@ class MicrosoftBot {
         )
         .first();
       if (await fieldError.isVisible().catch(() => false)) {
-        const msg = (await fieldError.textContent().catch(() => "")).trim();
+        const msg = (await fieldError.innerText().catch(() => "")).trim();
         if (msg) return `Validation/UI Error: ${msg}`;
       }
 
@@ -1814,7 +1814,7 @@ class MicrosoftBot {
         try {
           // evaluate textContent catches things innerText might miss (hidden/shadow)
           const frameText = await frame
-            .evaluate(() => document.body?.textContent || "")
+            .evaluate(() => document.body?.innerText || "")
             .catch(() => "");
           if (!frameText) continue;
 
