@@ -60,13 +60,6 @@ class MicrosoftBot {
     }
   }
 
-  async humanFill(locator, text) {
-    if (!text) return;
-    await locator.click({ force: true }).catch(() => {});
-    await this.humanDelay(300);
-    await locator.fill(text);
-  }
-
   // Clipboard paste — lebih cepat & tidak terpengaruh proxy/lag
   async humanPaste(locator, text) {
     if (!text) return;
@@ -936,7 +929,7 @@ class MicrosoftBot {
 
     await this.humanDelay(1010);
     if (regionIsInput) {
-      await this.humanFill(
+      await this.humanPaste(
         regionInput,
         this.accountConfig.microsoftAccount.state,
       );
@@ -1406,7 +1399,7 @@ class MicrosoftBot {
           if (resolved) break;
           const err = await this.checkForError();
           if (err) {
-            // Unify: instead of rejecting with a different label, 
+            // Unify: instead of rejecting with a different label,
             // resolve as "error" and store the message for consistent handling
             this._lastPaymentMonitorError = err;
             return resolve("error");
@@ -1503,7 +1496,7 @@ class MicrosoftBot {
       await this.triggerPaymentSaved();
     } else if (result === "error") {
       let errorText = "";
-      
+
       // Prioritize specific error from monitor if it caught more detail
       if (this._lastPaymentMonitorError) {
         errorText = this._lastPaymentMonitorError
