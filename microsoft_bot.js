@@ -1404,7 +1404,10 @@ class MicrosoftBot {
           if (resolved) break;
           const err = await this.checkForError();
           if (err) {
-            return reject(new Error(`MICROSOFT_ERROR_PAGE: ${err}`));
+            // Unify: instead of rejecting with a different label, 
+            // resolve as "error" and store the message for consistent handling
+            this._lastPaymentMonitorError = err;
+            return resolve("error");
           }
         }
         resolve(null);
@@ -1497,15 +1500,26 @@ class MicrosoftBot {
       console.log("[INFO] Payment successfully saved signal detected.");
       await this.triggerPaymentSaved();
     } else if (result === "error") {
-      const msg = await this.page
-        .locator('span[data-automation-id="error-message"]')
-        .first()
-        .textContent()
-        .catch(() => "Unknown payment error");
+      let errorText = "";
+      
+      // Prioritize specific error from monitor if it caught more detail
+      if (this._lastPaymentMonitorError) {
+        errorText = this._lastPaymentMonitorError
+          .replace(/Field Validation Error:|MICROSOFT_ERROR_PAGE:/i, "")
+          .trim();
+        this._lastPaymentMonitorError = null; // reset
+      }
 
-      const errorText = msg?.trim() || "Unknown payment error";
+      if (!errorText) {
+        const msg = await this.page
+          .locator('span[data-automation-id="error-message"]')
+          .first()
+          .textContent()
+          .catch(() => "Unknown payment error");
+        errorText = msg?.trim() || "Unknown payment error";
+      }
+
       console.error(`[ERROR] Payment error detected: ${errorText}`);
-
       throw new Error(`PAYMENT_DECLINED: ${errorText}`);
     } else if (result === null) {
       console.warn(
