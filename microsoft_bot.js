@@ -19,6 +19,7 @@ class MicrosoftBot {
     this.onPaymentSaved = onPaymentSaved;
     this._paymentSavedTriggered = false;
     this.currentStep = 0;
+    this._setupBtnReady = false;
   }
 
   async _logStep(stepNum, msg) {
@@ -731,16 +732,40 @@ class MicrosoftBot {
 
     console.log("[INFO] Waiting for Setup button...");
 
-    // ✅ Selector lebih luas: tangkap berbagai varian teks Setup tombol
+    const setupKeywords = [
+      // Setup Account variants
+      "Set up account",
+      "Setup Account",
+      "Setup",
+      "Set up",
+      "Siapkan akun",
+      "Atur Akun",
+      "Siapkan Akun",
+      "Atur",
+      "Siapkan",
+
+      // "Create new account"
+      "Create new account",
+      "Create account",
+      "Buat akun baru",
+      "Buat akun",
+
+      // Bahasa lain
+      "Crear cuenta nueva",
+      "Crear cuenta",
+      "Créer un compte",
+      "Neues Konto erstellen",
+      "Crea nuovo account",
+      "Criar nova conta",
+
+      "Mulai",
+    ];
+
     const setupBtnSelector = [
       'button[id*="Setup" i], button[data-testid*="Setup" i], button[data-bi-id*="Setup" i]',
       'a[data-bi-id*="Setup" i]',
-      'button:has-text("Setup")',
-      'button:has-text("Set up")',
-      'a:has-text("Setup")',
-      'button:has-text("Atur")',
-      'button:has-text("Siapkan")',
-      'button:has-text("Mulai")',
+      ...setupKeywords.map((kw) => `button:has-text("${kw}")`),
+      ...setupKeywords.map((kw) => `a:has-text("${kw}")`),
     ].join(", ");
 
     const setupBtn = this.page.locator(setupBtnSelector).first();
@@ -785,6 +810,13 @@ class MicrosoftBot {
   }
 
   async clickSetupAccountButton() {
+    if (this._setupBtnReady === false) {
+      console.log(
+        "[STEP 7] Setup already skipped or detected as basic info form, skipping click.",
+      );
+      return;
+    }
+
     await this._logStep(7, "Mengklik tombol Setup Account...");
     await this.clickButtonWithPossibleNames([
       // Setup Account variants
@@ -795,15 +827,16 @@ class MicrosoftBot {
       "Siapkan akun",
       "Atur Akun",
       "Siapkan Akun",
+      "Atur",
+      "Siapkan",
 
-      // "Create new account" — muncul saat email sudah punya akun kerja/sekolah
-      // (halaman "Let's get you started")
+      // "Create new account"
       "Create new account",
       "Create account",
       "Buat akun baru",
       "Buat akun",
 
-      // Bahasa lain (Spanyol, Prancis, Jerman, Italia, Portugis)
+      // Bahasa lain
       "Crear cuenta nueva",
       "Crear cuenta",
       "Créer un compte",
@@ -811,7 +844,6 @@ class MicrosoftBot {
       "Crea nuovo account",
       "Criar nova conta",
 
-      // Generic fallback
       "Mulai",
     ]);
     this._setupBtnReady = false;
