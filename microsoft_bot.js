@@ -790,6 +790,9 @@ class MicrosoftBot {
       )
       .first();
 
+    // Deteksi halaman OTP/Verifikasi (yang diminta user sebagai error)
+    const otpPage = this.page.locator('text=/Verification code|Enter the code|Kode verifikasi/i').first();
+
     const start = Date.now();
     const interval = setInterval(() => {
       console.log(
@@ -805,6 +808,9 @@ class MicrosoftBot {
         basicInfoForm
           .waitFor({ state: "visible", timeout: HARD_TIMEOUT })
           .then(() => "basicinfo"),
+        otpPage
+          .waitFor({ state: "visible", timeout: HARD_TIMEOUT })
+          .then(() => "otp"),
       ]).catch(() => null);
 
       if (winner === "setup") {
@@ -815,6 +821,9 @@ class MicrosoftBot {
           "[INFO] Basic info form already visible - setup button skipped by platform.",
         );
         this._setupBtnReady = false;
+      } else if (winner === "otp") {
+        console.error("[ERROR] OTP Verification page detected! Marking as error as requested.");
+        throw new Error("OTP_VERIFICATION_REQUIRED: Halaman verifikasi kode muncul. Tidak bisa lanjut otomatis.");
       } else {
         console.warn(
           "[WARN] Neither Setup button nor basic info form detected within timeout.",
