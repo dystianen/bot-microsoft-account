@@ -577,17 +577,23 @@ class MicrosoftBot {
         console.log(
           `[INFO] Clicking "Try for free" (Target: ${targetPlan}) via JS click...`,
         );
-        
+
         const [popup] = await Promise.all([
           this.page
             .context()
             .waitForEvent("page", { timeout: HARD_TIMEOUT })
             .catch(() => null),
           // Gunakan JS Click untuk menghindari timeout pada Playwright Click
-          tryFreeBtn.evaluate((el) => el.click()).catch(async () => {
-             console.log("[INFO] JS click failed, attempting native humanClick...");
-             await this.humanClick(tryFreeBtn).catch(e => console.error("[ERROR] Native click also failed:", e.message));
-          }),
+          tryFreeBtn
+            .evaluate((el) => el.click())
+            .catch(async () => {
+              console.log(
+                "[INFO] JS click failed, attempting native humanClick...",
+              );
+              await this.humanClick(tryFreeBtn).catch((e) =>
+                console.error("[ERROR] Native click also failed:", e.message),
+              );
+            }),
         ]);
 
         if (popup) {
@@ -1028,7 +1034,11 @@ class MicrosoftBot {
       console.log("Checkbox error:", err.message);
     }
 
-    await this.humanDelay(1310);
+    await this.humanDelay(1310, 2500);
+    await this.randomMouseMove();
+    if (Math.random() > 0.5) await this.humanScroll();
+    console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
+    await this.humanDelay(2000, 4000);
 
     await this.clickButtonWithPossibleNames([
       "Next",
@@ -1162,7 +1172,10 @@ class MicrosoftBot {
         this.accountConfig.microsoftAccount.password,
       );
     }
-    await this.humanDelay(500);
+    await this.humanDelay(1500, 3000);
+    await this.randomMouseMove();
+    console.log("[STEP 10] Pausing for 'thinking' delay before submit...");
+    await this.humanDelay(1500, 3500);
 
     await this.clickButtonWithPossibleNames([
       "Next",
@@ -1883,6 +1896,12 @@ class MicrosoftBot {
         "error code",
         "correlation id",
         "715-123280",
+        "not available",
+        "reached the limit",
+        "too many times",
+        "can't create your account",
+        "cannot create your account",
+        "identity could not be verified",
       ];
 
       for (const frame of this.page.frames()) {
@@ -1908,6 +1927,12 @@ class MicrosoftBot {
             console.log(
               `[ERROR] Marker "${found}" detected in frame: ${frame.url()}. Context: ${snippet}`,
             );
+
+            // Special handling for 715-123280 to give user better context
+            if (found === "715-123280" || snippet.includes("715-123280")) {
+              return `Something happened (715-123280): Microsoft memblokir sesi ini. Hal ini biasanya disebabkan oleh reputasi IP, penggunaan ulang data (Telepon/Perusahaan/Alamat), atau deteksi perilaku otomatis. Silakan coba menggunakan proxy baru atau data pendaftaran yang berbeda.`;
+            }
+
             return snippet || found;
           }
         } catch (e) {
