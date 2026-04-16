@@ -1474,13 +1474,19 @@ class MicrosoftBot {
 
       const result = await Promise.race([
         makeWatcher(
-          this.page.waitForSelector(
-            'span[data-automation-id="error-message"]',
-            {
-              state: "visible",
-              timeout,
-            },
-          ),
+          this.page
+            .locator('span[data-automation-id="error-message"]')
+            .first()
+            .waitFor({ state: "visible", timeout })
+            .then(async () => {
+              // Simpan pesan error ke _lastPaymentMonitorError agar konsisten dengan errorWatcher
+              const msg = await this.page
+                .locator('span[data-automation-id="error-message"]')
+                .first()
+                .textContent()
+                .catch(() => "");
+              if (msg?.trim()) this._lastPaymentMonitorError = msg.trim();
+            }),
           "error",
         ),
         makeWatcher(
@@ -1578,12 +1584,20 @@ class MicrosoftBot {
       }
 
       if (!errorText) {
-        const msg = await this.page
+        // Coba baca dari span error message
+        const spanMsg = await this.page
           .locator('span[data-automation-id="error-message"]')
           .first()
           .textContent()
-          .catch(() => "Unknown payment error");
-        errorText = msg?.trim() || "Unknown payment error";
+          .catch(() => "");
+        // Atau baca dari body teks secara umum
+        const bodyMsg = await this.page
+          .locator("text=/check that the details|coba kartu lain|try a different card/i")
+          .first()
+          .textContent()
+          .catch(() => "");
+        errorText =
+          (spanMsg || bodyMsg)?.trim() || "Unknown payment error";
       }
 
       console.error(`[ERROR] Payment error detected: ${errorText}`);
