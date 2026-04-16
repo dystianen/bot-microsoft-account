@@ -65,9 +65,9 @@ class MicrosoftBot {
   async humanPaste(locator, text) {
     if (!text) return;
     await locator.click({ force: true }).catch(() => {});
-    await this.humanDelay(200);
+    await this.page.waitForTimeout(100);
     await locator.fill(""); // clear dulu
-    await this.humanDelay(100);
+    await this.page.waitForTimeout(50);
     await this.page.evaluate((val) => {
       const el = document.activeElement;
       if (el) {
@@ -93,12 +93,23 @@ class MicrosoftBot {
     }
   }
 
+  async humanType(locator, text) {
+    if (!text) return;
+    await locator.click({ force: true }).catch(() => {});
+    await this.page.waitForTimeout(100);
+    await locator.fill("");
+    // Mengetik dengan delay acak antar karakter (30ms - 90ms) agar terasa natural tapi tetap cepat
+    await locator.pressSequentially(text, {
+      delay: Math.floor(Math.random() * 60) + 30,
+    });
+  }
+
   async humanClick(locator, options = {}) {
     await this.randomMouseMove();
     await locator.hover({ force: true }).catch(() => {});
-    await this.humanDelay(500);
+    await this.page.waitForTimeout(300);
     await locator.click({ force: true, ...options });
-    await this.humanDelay(300);
+    await this.page.waitForTimeout(200);
   }
 
   async randomMouseMove() {
@@ -727,29 +738,16 @@ class MicrosoftBot {
     const emailInput = this.getGenericLocator("email");
     await this.waitForVisible(emailInput);
     await this.randomMouseMove();
-    await emailInput.click();
-    await this.humanPaste(emailInput, email);
+    await this.humanType(emailInput, email);
 
-    // Verifikasi isi field sudah benar — guard untuk koneksi proxy lambat
-    // jika belum lengkap, pakai insertText (seperti copas)
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      await this.humanDelay(700);
-      const currentValue = await emailInput.inputValue().catch(() => "");
-      if (currentValue.trim() === email.trim()) {
-        console.log(`[STEP 5] Email verified in input field.`);
-        break;
-      }
-      console.warn(
-        `[STEP 5] Email mismatch (attempt ${attempt}/${MAX_RETRIES}): expected "${email}", got "${currentValue}". Retrying with insertText...`,
-      );
-      await this.humanPaste(emailInput, "");
-      await this.humanDelay(400);
-      await emailInput.focus();
-      await this.humanPaste(emailInput, email);
+    // Verifikasi cepat
+    const currentValue = await emailInput.inputValue().catch(() => "");
+    if (currentValue.trim() !== email.trim()) {
+      console.warn(`[STEP 5] Email mismatch, fixing with rapid fill...`);
+      await emailInput.fill(email);
     }
 
-    await this.humanDelay(1500);
+    await this.page.waitForTimeout(500);
   }
 
   async submitEmailAndWaitForSetup() {
@@ -900,7 +898,7 @@ class MicrosoftBot {
       firstLocator,
       this.accountConfig.microsoftAccount.firstName,
     );
-    await this.humanDelay(400);
+    await this.page.waitForTimeout(200);
 
     // Last name
     const lastLocator = this.getGenericLocator("last");
@@ -909,7 +907,7 @@ class MicrosoftBot {
       lastLocator,
       this.accountConfig.microsoftAccount.lastName,
     );
-    await this.humanDelay(500);
+    await this.page.waitForTimeout(200);
 
     // Company
     const companyLocator = this.getGenericLocator("company");
@@ -918,7 +916,7 @@ class MicrosoftBot {
       companyLocator,
       this.accountConfig.microsoftAccount.companyName,
     );
-    await this.humanDelay(400);
+    await this.page.waitForTimeout(200);
 
     // Company size
     await this.humanScroll();
@@ -926,7 +924,7 @@ class MicrosoftBot {
       'div[role="combobox"][id*="size" i], div[role="combobox"][data-testid*="size" i], select[id*="size" i]',
       this.accountConfig.microsoftAccount.companySize,
     );
-    await this.humanDelay(1200, 2000);
+    await this.humanDelay(600, 1000);
 
     // Phone — pakai paste
     const phoneLocator = this.getGenericLocator("phone");
@@ -935,7 +933,7 @@ class MicrosoftBot {
       phoneLocator,
       this.accountConfig.microsoftAccount.phone,
     );
-    await this.humanDelay(300);
+    await this.page.waitForTimeout(200);
 
     // Job — pakai paste
     const jobLocator = this.getGenericLocator("job");
@@ -944,7 +942,7 @@ class MicrosoftBot {
       jobLocator,
       this.accountConfig.microsoftAccount.jobTitle,
     );
-    await this.humanDelay(500);
+    await this.page.waitForTimeout(300);
 
     // Address 1 — pakai paste
     const addressLocator = this.getGenericLocator("address");
@@ -953,7 +951,7 @@ class MicrosoftBot {
       addressLocator,
       this.accountConfig.microsoftAccount.address,
     );
-    await this.humanDelay(400);
+    await this.page.waitForTimeout(200);
 
     // City — pakai paste
     const cityLocator = this.getGenericLocator("city");
@@ -962,7 +960,7 @@ class MicrosoftBot {
       cityLocator,
       this.accountConfig.microsoftAccount.city,
     );
-    await this.humanDelay(400);
+    await this.page.waitForTimeout(200);
 
     const regionInput = this.page
       .locator('input[id*="region" i], input[id*="state" i]')
@@ -973,7 +971,7 @@ class MicrosoftBot {
       .then(() => true)
       .catch(() => false);
 
-    await this.humanDelay(1010);
+    await this.page.waitForTimeout(400);
     if (regionIsInput) {
       await this.humanPaste(
         regionInput,
@@ -1006,7 +1004,7 @@ class MicrosoftBot {
           this.accountConfig.microsoftAccount.postalCode,
         );
         console.log("Postal filled");
-        await this.humanDelay(1000);
+        await this.page.waitForTimeout(400);
       } catch {
         console.log("Postal found but failed to fill");
       }
@@ -1028,7 +1026,7 @@ class MicrosoftBot {
       'div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]',
       ["No", "Tidak"],
     );
-    await this.humanDelay(2000, 3000);
+    await this.humanDelay(800, 1500);
 
     // Checkbox
     try {
@@ -1056,11 +1054,11 @@ class MicrosoftBot {
       console.log("Checkbox error:", err.message);
     }
 
-    await this.humanDelay(1310, 2500);
+    await this.humanDelay(600, 1200);
     await this.randomMouseMove();
     if (Math.random() > 0.5) await this.humanScroll();
     console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(2000, 4000);
+    await this.humanDelay(800, 1500);
 
     await this.clickButtonWithPossibleNames([
       "Next",
@@ -1173,13 +1171,13 @@ class MicrosoftBot {
     // ✅ Password: gunakan humanPaste (copas) agar lebih stabil terhadap lag/proxy
     // Sama seperti yang dilakukan pada pengisian biodata sebelumnya
     await passwordLocator.click({ force: true }).catch(() => {});
-    await this.humanDelay(300);
+    await this.page.waitForTimeout(150);
     await this.humanPaste(
       passwordLocator,
       this.accountConfig.microsoftAccount.password,
     );
 
-    await this.humanDelay(700);
+    await this.page.waitForTimeout(300);
     const confirmPasswordLocator = this.page
       .locator('input[type="password"]')
       .nth(1);
@@ -1194,10 +1192,10 @@ class MicrosoftBot {
         this.accountConfig.microsoftAccount.password,
       );
     }
-    await this.humanDelay(1500, 3000);
+    await this.humanDelay(800, 1500);
     await this.randomMouseMove();
     console.log("[STEP 10] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(1500, 3500);
+    await this.humanDelay(1000, 1800);
 
     await this.clickButtonWithPossibleNames([
       "Next",
@@ -1215,7 +1213,7 @@ class MicrosoftBot {
       // Tunggu halaman benar-benar settle setelah submit password
       await this.page.waitForLoadState("domcontentloaded");
       await this.waitForSpinnerGone();
-      await this.humanDelay(1500); // beri waktu DOM stabil
+      await this.page.waitForTimeout(800); // beri waktu DOM stabil
 
       if (await this.checkForError()) {
         throw new Error(
@@ -1369,7 +1367,7 @@ class MicrosoftBot {
       }
 
       console.log("[STEP 12] Payment page not yet visible, retrying...");
-      await this.humanDelay(1000);
+      await this.page.waitForTimeout(500);
     }
 
     throw new Error("Timeout waiting for payment page");
