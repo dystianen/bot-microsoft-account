@@ -797,7 +797,20 @@ class MicrosoftBot {
 
     // Deteksi halaman OTP/Verifikasi (yang diminta user sebagai error)
     const otpPage = this.page
-      .locator("text=/Verification code|Enter the code|Kode verifikasi/i")
+      .locator(
+        [
+          // Teks di sekitarnya
+          'text=/Verification code|Enter the code|Kode verifikasi|Masukkan kode|Kami telah mengirim kode/i',
+          // Input field
+          'input[aria-label*="code" i]',
+          'input[id*="code" i]',
+          'input[name*="code" i]',
+          'input[placeholder*="code" i]',
+          // Tombol aksi
+          'button:has-text("Verifikasi")',
+          'button:has-text("Verify")',
+        ].join(", "),
+      )
       .first();
 
     const start = Date.now();
@@ -1921,6 +1934,11 @@ class MicrosoftBot {
         "can't create your account",
         "cannot create your account",
         "identity could not be verified",
+        "Verification code",
+        "Kode verifikasi",
+        "Enter the code",
+        "Masukkan kode",
+        "Kami telah mengirim kode",
       ];
 
       for (const frame of this.page.frames()) {
