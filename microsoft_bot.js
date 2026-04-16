@@ -574,27 +574,38 @@ class MicrosoftBot {
       // Greedily search for title in cards
       for (let i = 0; i < count; i++) {
         const card = cards.nth(i);
+
+        // Tunggu sebentar agar teks dalam card ter-render (untuk menghindari title kosong)
+        const text = await card.innerText().catch(() => "");
+
+        // Cek apakah target plan ada di judul spesifik atau di seluruh teks card (lebih aman)
         const title = await card
           .locator(".oc-product-title")
           .first()
           .textContent()
           .catch(() => "");
-        if (title.toUpperCase().includes(targetPlan.toUpperCase())) {
+
+        if (
+          title.toUpperCase().includes(targetPlan.toUpperCase()) ||
+          text.toUpperCase().includes(targetPlan.toUpperCase())
+        ) {
+          console.log(`[INFO] Matching card found for ${targetPlan} at index ${i}`);
           targetCard = card;
           break;
         }
       }
 
-      const cardToUse =
-        targetCard || (count >= 2 ? cards.nth(1) : cards.first());
-      const tryFreeBtn = cardToUse
-        .locator('a:has-text("Try for free"), a:has-text("Coba gratis")')
-        .first();
+      const cardToUse = targetCard;
 
-      if ((await tryFreeBtn.count()) > 0) {
-        console.log(
-          `[INFO] Clicking "Try for free" (Target: ${targetPlan}) via JS click...`,
-        );
+      if (cardToUse) {
+        const tryFreeBtn = cardToUse
+          .locator('a:has-text("Try for free"), a:has-text("Coba gratis")')
+          .first();
+
+        if ((await tryFreeBtn.count()) > 0) {
+          console.log(
+            `[INFO] Clicking "Try for free" (Target: ${targetPlan}) via JS click...`,
+          );
 
         const [popup] = await Promise.all([
           this.page
@@ -634,6 +645,7 @@ class MicrosoftBot {
           await this.humanDelay(1500); // Small grace period for event listeners to attach
           return;
         }
+      }
       }
     }
 
