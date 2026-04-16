@@ -772,58 +772,28 @@ class MicrosoftBot {
       "Berikutnya",
     ]);
 
-    // ✅ Tunggu spinner selesai dulu sebelum mendeteksi elemen berikutnya.
-    // Tanpa ini, bot bisa salah mendeteksi elemen saat halaman masih loading.
+    // Tunggu spinner selesai dulu sebelum mendeteksi elemen berikutnya
     console.log("[INFO] Waiting for page to settle after email submit...");
     await this.waitForSpinnerGone(500);
 
-    console.log("[INFO] Waiting for Setup button OR basic info form...");
+    console.log("[INFO] Detecting page state after email submit...");
 
-    // Deteksi tombol Setup Account (gunakan locator langsung, bukan getGenericButton yang tidak ada)
-    const setupBtn = this.page
-      .locator(
-        [
-          'button:has-text("Set up account")',
-          'button:has-text("Setup Account")',
-          'button:has-text("Setup")',
-          'button:has-text("Set up")',
-          'button:has-text("Siapkan akun")',
-          'button:has-text("Atur Akun")',
-          'button:has-text("Siapkan Akun")',
-          'button:has-text("Atur")',
-          'button:has-text("Siapkan")',
-          'button:has-text("Create new account")',
-          'button:has-text("Create account")',
-          'button:has-text("Buat akun baru")',
-          'button:has-text("Buat akun")',
-          'button:has-text("Mulai")',
-          '[role="button"]:has-text("Set up account")',
-          '[role="button"]:has-text("Create new account")',
-          '[role="button"]:has-text("Siapkan akun")',
-          '[role="button"]:has-text("Buat akun baru")',
-        ].join(", "),
-      )
-      .first();
-
-    // Deteksi form biodata (berarti halaman langsung tampilkan form, skip setup button)
+    // Deteksi form biodata (halaman langsung tampilkan form, skip setup button)
     const basicInfoForm = this.page
       .locator(
         'input[id*="first" i], input[id*="fname" i], input[id*="firstName" i]',
       )
       .first();
 
-    // Deteksi halaman OTP/Verifikasi (yang diminta user sebagai error)
+    // Deteksi halaman OTP/Verifikasi
     const otpPage = this.page
       .locator(
         [
-          // Teks di sekitarnya
           "text=/Verification code|Enter the code|Kode verifikasi|Masukkan kode|Kami telah mengirim kode/i",
-          // Input field
           'input[aria-label*="code" i]',
           'input[id*="code" i]',
           'input[name*="code" i]',
           'input[placeholder*="code" i]',
-          // Tombol aksi
           'button:has-text("Verifikasi")',
           'button:has-text("Verify")',
         ].join(", "),
@@ -833,16 +803,13 @@ class MicrosoftBot {
     const start = Date.now();
     const interval = setInterval(() => {
       console.log(
-        `[INFO] Still waiting Setup... ${Math.round((Date.now() - start) / 1000)}s`,
+        `[INFO] Still waiting page state... ${Math.round((Date.now() - start) / 1000)}s`,
       );
     }, 15000);
 
     try {
       const winner = await this.runWithMonitor(
         Promise.race([
-          setupBtn
-            .waitFor({ state: "visible", timeout: HARD_TIMEOUT })
-            .then(() => "setup"),
           basicInfoForm
             .waitFor({ state: "visible", timeout: HARD_TIMEOUT })
             .then(() => "basicinfo"),
@@ -853,32 +820,29 @@ class MicrosoftBot {
         HARD_TIMEOUT,
       ).catch((e) => {
         console.warn(
-          `[WARN] setup wait error or monitor trigger: ${e.message}`,
+          `[WARN] page state detection ended: ${e.message}`,
         );
         return null;
       });
 
-      if (winner === "setup") {
-        console.log("[INFO] Setup button detected.");
-        this._setupBtnReady = true;
-      } else if (winner === "basicinfo") {
+      if (winner === "basicinfo") {
         console.log(
-          "[INFO] Basic info form already visible - setup button skipped by platform.",
+          "[INFO] Basic info form visible — setup button step will be skipped.",
         );
         this._setupBtnReady = false;
       } else if (winner === "otp") {
         console.error(
-          "[ERROR] OTP Verification page detected! Marking as error as requested.",
+          "[ERROR] OTP Verification page detected!",
         );
         throw new Error(
           "OTP_VERIFICATION_REQUIRED: Halaman verifikasi kode muncul. Tidak bisa lanjut otomatis.",
         );
       } else {
-        // null = timeout/unknown — tetap coba klik setup button di step berikutnya
-        console.warn(
-          `[WARN] Neither Setup button nor basic info form detected within timeout. Current URL: ${this.page.url()}`,
+        // null = timeout — kemungkinan setup button perlu diklik, coba di step 7
+        console.log(
+          `[INFO] Basic info not yet visible. Setup button likely needed. URL: ${this.page.url()}`,
         );
-        this._setupBtnReady = null; // null = tetap coba, bukan skip
+        this._setupBtnReady = true;
       }
     } finally {
       clearInterval(interval);
@@ -886,18 +850,16 @@ class MicrosoftBot {
   }
 
   async clickSetupAccountButton() {
-    // false = form biodata sudah langsung muncul, skip klik setup
-    // null atau true = tetap coba klik (karena mungkin button ada)
+    // false = form biodata sudah langsung muncul, tidak perlu klik setup
     if (this._setupBtnReady === false) {
-      console.log(
-        "[STEP 7] Setup skipped: basic info form already visible.",
-      );
+      console.log("[STEP 7] Setup skipped: basic info form already visible.");
       return;
     }
 
     await this._logStep(7, "Mengklik tombol Setup Account...");
-    await this.clickButtonWithPossibleNames([
-      // Setup Account variants
+
+    // Gunakan clickButtonWithPossibleNames — sudah ada retry dan fallback Playwright
+    const clicked = await this.clickButtonWithPossibleNames([
       "Set up account",
       "Setup Account",
       "Setup",
@@ -907,23 +869,23 @@ class MicrosoftBot {
       "Siapkan Akun",
       "Atur",
       "Siapkan",
-
-      // "Create new account"
       "Create new account",
       "Create account",
       "Buat akun baru",
       "Buat akun",
-
-      // Bahasa lain
       "Crear cuenta nueva",
       "Crear cuenta",
       "Créer un compte",
       "Neues Konto erstellen",
       "Crea nuovo account",
       "Criar nova conta",
-
       "Mulai",
     ]);
+
+    if (!clicked) {
+      console.warn("[STEP 7] Setup button not found — platform may have skipped it.");
+    }
+
     this._setupBtnReady = false;
   }
 
