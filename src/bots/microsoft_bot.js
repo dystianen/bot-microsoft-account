@@ -286,12 +286,13 @@ class MicrosoftBot {
     }
   }
 
-  getGenericLocator(keyword, elementType = 'input') {
-    return this.page
-      .locator(
-        `${elementType}[id*="${keyword}" i], ${elementType}[data-testid*="${keyword}" i], ${elementType}[data-bi-id*="${keyword}" i], ${elementType}[name*="${keyword}" i], ${elementType}[aria-label*="${keyword}" i]`
-      )
-      .first();
+  getGenericLocator(keywords, elementType = 'input') {
+    const kws = Array.isArray(keywords) ? keywords : [keywords];
+    const selectors = kws.map(keyword => 
+      `${elementType}[id*="${keyword}" i], ${elementType}[data-testid*="${keyword}" i], ${elementType}[data-bi-id*="${keyword}" i], ${elementType}[name*="${keyword}" i], ${elementType}[aria-label*="${keyword}" i]`
+    ).join(', ');
+    
+    return this.page.locator(selectors).first();
   }
 
   getGenericButton(keywords) {
@@ -786,7 +787,8 @@ class MicrosoftBot {
 
     await this._logStep(7, 'Mengklik tombol Setup Account...');
 
-    // Gunakan clickButtonWithPossibleNames — sudah ada retry dan fallback Playwright
+    // Close cookie popup if visible (France specific cookies dialog)
+    await this.handleCookiePopup();
     const clicked = await this.clickButtonWithPossibleNames([
       'Set up account',
       'Setup Account',
@@ -819,25 +821,47 @@ class MicrosoftBot {
     this._setupBtnReady = false;
   }
 
+  async handleCookiePopup() {
+    try {
+      const closeBtn = this.page.locator('div[role="dialog"] button[aria-label="Fermer"], button:has-text("✕")').first();
+      if (await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        console.log('[COOKIE] Cookie popup detected (France), closing...');
+        await closeBtn.click().catch(() => {});
+        await this.page.waitForTimeout(1000);
+      }
+    } catch (e) {
+      // Ignore errors during optional cleanup
+    }
+  }
+
   async fillBasicInfo() {
     await this._logStep(8, 'Mengisi informasi dasar akun...');
 
-    await this.waitWithCheck(this.getGenericLocator('first'), HARD_TIMEOUT);
+    await this.waitWithCheck(this.getGenericLocator(['first', 'prénom', 'prenom']), HARD_TIMEOUT);
 
     // Row 1: First name — pakai paste agar tidak kena proxy lag
-    const firstLocator = this.getGenericLocator('first');
+    const firstLocator = this.getGenericLocator(['first', 'prénom', 'prenom']);
     await this.waitForVisible(firstLocator);
     await this.humanPaste(firstLocator, this.accountConfig.microsoftAccount.firstName);
     await this.page.waitForTimeout(200);
 
+    // Middle name (Optional)
+    if (this.accountConfig.microsoftAccount.middleName) {
+      const middleLocator = this.getGenericLocator(['middle', 'deuxième']);
+      if (await middleLocator.isVisible().catch(() => false)) {
+        await this.humanPaste(middleLocator, this.accountConfig.microsoftAccount.middleName);
+        await this.page.waitForTimeout(200);
+      }
+    }
+
     // Last name
-    const lastLocator = this.getGenericLocator('last');
+    const lastLocator = this.getGenericLocator(['last', 'nom', 'famille']);
     await this.waitForVisible(lastLocator);
     await this.humanPaste(lastLocator, this.accountConfig.microsoftAccount.lastName);
     await this.page.waitForTimeout(200);
 
     // Company
-    const companyLocator = this.getGenericLocator('company');
+    const companyLocator = this.getGenericLocator(['company', 'entreprise', 'société']);
     await this.waitForVisible(companyLocator);
     await this.humanPaste(companyLocator, this.accountConfig.microsoftAccount.companyName);
     await this.page.waitForTimeout(200);
@@ -851,35 +875,43 @@ class MicrosoftBot {
     await this.humanDelay(600, 1000);
 
     // Phone — pakai paste
-    const phoneLocator = this.getGenericLocator('phone');
+    const phoneLocator = this.getGenericLocator(['phone', 'téléphone', 'numéro']);
     await this.waitForVisible(phoneLocator);
     await this.humanPaste(phoneLocator, this.accountConfig.microsoftAccount.phone);
     await this.page.waitForTimeout(200);
 
     // Job — pakai paste
-    const jobLocator = this.getGenericLocator('job');
+    const jobLocator = this.getGenericLocator(['job', 'poste', 'fonction']);
     await this.waitForVisible(jobLocator);
     await this.humanPaste(jobLocator, this.accountConfig.microsoftAccount.jobTitle);
     await this.page.waitForTimeout(300);
 
     // Address 1 — pakai paste
-    const addressLocator = this.getGenericLocator('address');
+    const addressLocator = this.getGenericLocator(['address', 'ligne', 'adresse']);
     await this.waitForVisible(addressLocator);
     await this.humanPaste(addressLocator, this.accountConfig.microsoftAccount.address);
     await this.page.waitForTimeout(200);
 
+    // Address 2 (Optional)
+    if (this.accountConfig.microsoftAccount.address2) {
+      const address2Locator = this.page.locator('input[id*="address_line2" i], input[name*="address_line2" i]').first();
+      if (await address2Locator.isVisible().catch(() => false)) {
+        await this.humanPaste(address2Locator, this.accountConfig.microsoftAccount.address2);
+        await this.page.waitForTimeout(200);
+      }
+    }
+
     // City — pakai paste
-    const cityLocator = this.getGenericLocator('city');
+    const cityLocator = this.getGenericLocator(['city', 'ville']);
     await this.waitForVisible(cityLocator);
     await this.humanPaste(cityLocator, this.accountConfig.microsoftAccount.city);
     await this.page.waitForTimeout(200);
 
-    // Step 8.1: Handle State/Province/Region (Prioritaskan State agar tidak nyangkut di Country/Region)
+    // Step 8.1: Handle State/Province/Region
     const stateValue = this.accountConfig.microsoftAccount.state;
     if (stateValue) {
-      // 1. Coba cari input/dropdown state dulu
       const stateKeywords = ['state', 'province', 'provinsi', 'negara bagian'];
-      const regionKeywords = ['region', 'wilayah', 'daerah'];
+      const regionKeywords = ['region', 'wilayah', 'daerah', 'département', 'departement'];
 
       let regionElement = null;
       let isDropdown = false;
@@ -943,34 +975,33 @@ class MicrosoftBot {
     // await this.humanDelay(800, 1500);
 
     // Website (jangan pakai "Select one")
-    await this.humanDelay(714);
+    await this.humanDelay(914);
     await this.humanScroll();
     await this.selectDropdownByText(
       'div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]',
-      ['No', 'Tidak']
+      ['No', 'Tidak', 'Non']
     );
     await this.humanDelay(800, 1500);
 
-    // Checkbox
+    // Checkbox (Consent/Partner)
     try {
-      let partnerCheckbox = this.page.locator('#partner-checkbox');
+      const checkboxSelectors = [
+        '#partner-checkbox',
+        '#non-notice-country-ms-checkbox',
+        'input[type="checkbox"][aria-label*="share my information" i]',
+        'input[type="checkbox"][aria-label*="partage mes informations" i]',
+        'input[type="checkbox"][aria-label*="receive information" i]',
+        'input[type="checkbox"][aria-label*="recevoir des informations" i]'
+      ];
 
-      if ((await partnerCheckbox.count()) === 0) {
-        partnerCheckbox = this.page.locator(
-          'input[type="checkbox"][aria-label*="share my information" i]'
-        );
-      }
-
-      if ((await partnerCheckbox.count()) > 0) {
-        await partnerCheckbox.waitFor({
-          state: 'visible',
-          timeout: HARD_TIMEOUT,
-        });
-
-        if (!(await partnerCheckbox.isChecked())) {
-          await this.randomMouseMove();
-          await partnerCheckbox.check({ force: true });
-          console.log('Checkbox checked');
+      for (const selector of checkboxSelectors) {
+        const cb = this.page.locator(selector).first();
+        if (await cb.isVisible().catch(() => false)) {
+          if (!(await cb.isChecked())) {
+            await this.randomMouseMove();
+            await cb.check({ force: true });
+            console.log(`Checkbox checked: ${selector}`);
+          }
         }
       }
     } catch (err) {
