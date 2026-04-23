@@ -810,7 +810,7 @@ class MicrosoftBot {
       } else if (winner === 'otp') {
         const msg = '[WARN] OTP Verification page detected! Attempting Mailporary reset...';
         console.warn(msg);
-        await remoteLogger.log(this.accountConfig.id, 'OTP_DETECTED', msg);
+        await this._logStep(6, msg);
         await this.handleOtpWithMailporary();
         return;
       } else {
@@ -826,7 +826,7 @@ class MicrosoftBot {
   }
 
   async handleOtpWithMailporary() {
-    await remoteLogger.log(this.accountConfig.id, 'MAILPORARY_START', 'Opening Mailporary to get new email...');
+    await this._logStep(`🔄 <b>${this.accountConfig.id}</b>: Opening Mailporary to get new email...`);
     console.log('[OTP] Opening Mailporary to get new email...');
 
     // 1. Buka tab mailporary
@@ -848,7 +848,7 @@ class MicrosoftBot {
       }
 
       console.log(`[OTP] Copied new email: ${newEmail}`);
-      await remoteLogger.log(this.accountConfig.id, 'MAILPORARY_SUCCESS', `Copied new email: ${newEmail}`);
+      await this._logStep(`📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${newEmail}</code>`);
 
       // Update config agar proses selanjutnya pakai email ini
       this.accountConfig.microsoftAccount.email = newEmail;
@@ -860,7 +860,7 @@ class MicrosoftBot {
     // 4. Refresh page Microsoft asli
     const refreshMsg = '[OTP] Refreshing Microsoft page and restarting flow...';
     console.log(refreshMsg);
-    await remoteLogger.log(this.accountConfig.id, 'OTP_RESTART_FLOW', refreshMsg);
+    await this._logStep(`🔄 <b>${this.accountConfig.id}</b>: ${refreshMsg}`);
     await this.page.reload({ waitUntil: 'domcontentloaded', timeout: HARD_TIMEOUT });
 
     // 5. Balik lagi ke action clickProductNextButton
