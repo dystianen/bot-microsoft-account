@@ -775,8 +775,16 @@ class MicrosoftBot {
     // Deteksi halaman OTP/Verifikasi - Gunakan .or() agar tidak terjadi SyntaxError pada text=/regex/
     const otpPage = this.page
       .locator('button[data-bi-id="VerifyCode"]')
-      .or(this.page.locator('button:has-text("Verifikasi"), button:has-text("Verify"), button:has-text("Vérifier")'))
-      .or(this.page.locator('label:has-text("Code de vérification"), label:has-text("Verification code"), label:has-text("Kode verifikasi")'))
+      .or(
+        this.page.locator(
+          'button:has-text("Verifikasi"), button:has-text("Verify"), button:has-text("Vérifier")'
+        )
+      )
+      .or(
+        this.page.locator(
+          'label:has-text("Code de vérification"), label:has-text("Verification code"), label:has-text("Kode verifikasi")'
+        )
+      )
       .or(
         this.page.locator(
           'text=/Verification code|Enter the code|Kode verifikasi|Masukkan kode|Kami telah mengirim kode|Code de vérification|Entrez le code|Nous avons envoyé le code/i'
@@ -784,7 +792,9 @@ class MicrosoftBot {
       )
       .first();
 
-    console.log(`[INFO] Detecting page state... URL: ${this.page.url()} | Title: ${await this.page.title().catch(() => 'N/A')}`);
+    console.log(
+      `[INFO] Detecting page state... URL: ${this.page.url()} | Title: ${await this.page.title().catch(() => 'N/A')}`
+    );
     const start = Date.now();
     const interval = setInterval(() => {
       console.log(`[INFO] Still waiting page state... ${Math.round((Date.now() - start) / 1000)}s`);
@@ -826,7 +836,9 @@ class MicrosoftBot {
   }
 
   async handleOtpWithMailporary() {
-    await this._logStep(`🔄 <b>${this.accountConfig.id}</b>: Opening Mailporary to get new email...`);
+    await this._logStep(
+      `🔄 <b>${this.accountConfig.id}</b>: Opening Mailporary to get new email...`
+    );
     console.log('[OTP] Opening Mailporary to get new email...');
 
     // 1. Buka tab mailporary
@@ -841,14 +853,25 @@ class MicrosoftBot {
       const emailInput = mailporaryPage.locator('input[aria-label="Email Address"]');
       await emailInput.waitFor({ state: 'visible', timeout: HARD_TIMEOUT });
 
-      const newEmail = await emailInput.getAttribute('value');
+      // Tunggu sampai value benar-benar ada isinya (bukan loading)
+      await mailporaryPage.waitForFunction(
+        () => {
+          const input = document.querySelector('input[aria-label="Email Address"]');
+          return input && input.value && input.value.includes('@');
+        },
+        { timeout: HARD_TIMEOUT }
+      );
+
+      const newEmail = await emailInput.inputValue();
 
       if (!newEmail || !newEmail.includes('@')) {
         throw new Error('Failed to extract valid email from Mailporary');
       }
 
       console.log(`[OTP] Copied new email: ${newEmail}`);
-      await this._logStep(`📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${newEmail}</code>`);
+      await this._logStep(
+        `📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${newEmail}</code>`
+      );
 
       // Update config agar proses selanjutnya pakai email ini
       this.accountConfig.microsoftAccount.email = newEmail;
@@ -2024,7 +2047,7 @@ class MicrosoftBot {
         'too many times',
         "can't create your account",
         'cannot create your account',
-        'identity could not be verified', 
+        'identity could not be verified',
       ];
 
       for (const frame of this.page.frames()) {
