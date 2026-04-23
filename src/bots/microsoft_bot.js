@@ -783,10 +783,14 @@ class MicrosoftBot {
           'button:has-text("Verifikasi")',
           'button:has-text("Verify")',
           'button:has-text("Vérifier")',
+          'button[data-bi-id="VerifyCode"]',
+          '[id*="VerifyCode"]',
+          'label:has-text("Code de vérification")',
         ].join(', ')
       )
       .first();
 
+    console.log(`[INFO] Detecting page state... URL: ${this.page.url()} | Title: ${await this.page.title().catch(() => 'N/A')}`);
     const start = Date.now();
     const interval = setInterval(() => {
       console.log(`[INFO] Still waiting page state... ${Math.round((Date.now() - start) / 1000)}s`);
