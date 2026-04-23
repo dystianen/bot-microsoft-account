@@ -2026,7 +2026,7 @@ class MicrosoftBot {
         'too many times',
         "can't create your account",
         'cannot create your account',
-        'identity could not be verified',
+        'identity could not be verified', 
       ];
 
       for (const frame of this.page.frames()) {
