@@ -211,35 +211,47 @@ class MicrosoftBot {
     await this.runWithMonitor(locator.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
   }
 
-  async clickButtonWithPossibleNames(names, timeout = HARD_TIMEOUT) {
+  async clickButtonWithPossibleNames(names, options = {}) {
     await this.waitForSpinnerGone();
+
+    const { excludeText = [] } = options;
+
+    // Normalize exclude keywords
+    const excludeLower = excludeText.map((e) => e.trim().toLowerCase());
 
     // ✅ Partial keyword matching — pecah tiap name jadi kata-katanya
     const keywords = names.flatMap((n) => n.trim().toLowerCase().split(/\s+/));
-    // Deduplicate
     const uniqueKeywords = [...new Set(keywords)];
 
-    const found = await this.page.evaluate((keywords) => {
-      const candidates = [
-        ...document.querySelectorAll(
-          'button, [role="button"], a[role="button"], input[type="button"], input[type="submit"]'
-        ),
-      ];
+    const found = await this.page.evaluate(
+      ({ keywords, excludeLower }) => {
+        const candidates = [
+          ...document.querySelectorAll(
+            'button, [role="button"], a[role="button"], input[type="button"], input[type="submit"]'
+          ),
+        ];
 
-      const el = candidates.find((b) => {
-        const text = (b.textContent || b.value || b.getAttribute('aria-label') || '')
-          .trim()
-          .toLowerCase();
+        const el = candidates.find((b) => {
+          const text = (b.textContent || b.value || b.getAttribute('aria-label') || '')
+            .trim()
+            .toLowerCase();
 
-        // ✅ Cukup ada 1 keyword yang cocok, teks tidak terlalu panjang
-        return text.length > 0 && text.length < 60 && keywords.some((kw) => text.includes(kw));
-      });
+          if (text.length === 0 || text.length >= 60) return false;
 
-      if (!el) return null;
+          // ❌ Skip jika mengandung excluded keyword
+          if (excludeLower.some((ex) => text.includes(ex))) return false;
 
-      el.click();
-      return el.textContent?.trim() || el.value || 'unknown';
-    }, uniqueKeywords);
+          // ✅ Match jika ada keyword yang cocok
+          return keywords.some((kw) => text.includes(kw));
+        });
+
+        if (!el) return null;
+
+        el.click();
+        return el.textContent?.trim() || el.value || 'unknown';
+      },
+      { keywords: uniqueKeywords, excludeLower }
+    );
 
     if (found) {
       console.log(`[INFO] Clicked: "${found}"`);
@@ -253,7 +265,26 @@ class MicrosoftBot {
       'i'
     );
 
-    const button = this.page.getByRole('button', { name: pattern }).first();
+    // Playwright fallback juga perlu filter exclude
+    const allButtonLocators = this.page.getByRole('button', { name: pattern });
+    const count = await allButtonLocators.count();
+
+    let button = null;
+    for (let i = 0; i < count; i++) {
+      const candidate = allButtonLocators.nth(i);
+      const text = (await candidate.textContent().catch(() => '')).trim().toLowerCase();
+      if (excludeLower.some((ex) => text.includes(ex))) {
+        console.log(`[CLICK] Skipping excluded button (Playwright): "${text}"`);
+        continue;
+      }
+      button = candidate;
+      break;
+    }
+
+    // Kalau semua excluded atau tidak ada, fallback ke .first()
+    if (!button) {
+      button = allButtonLocators.first();
+    }
 
     try {
       await this.runWithMonitor(button.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
@@ -268,6 +299,13 @@ class MicrosoftBot {
         try {
           const frameButton = frame.getByRole('button', { name: pattern }).first();
           if (await frameButton.isVisible().catch(() => false)) {
+            const frameText = (await frameButton.textContent().catch(() => ''))
+              .trim()
+              .toLowerCase();
+            if (excludeLower.some((ex) => frameText.includes(ex))) {
+              console.log(`[CLICK] Skipping excluded button in frame: "${frameText}"`);
+              continue;
+            }
             console.log(`[INFO] Found and clicking button in frame: ${frame.url()}`);
             await frameButton.click();
             return true;
@@ -282,6 +320,7 @@ class MicrosoftBot {
       );
       console.error(`[ERROR] Button not found. Available buttons:`, allButtons);
       console.error(`[ERROR] Looking for keywords:`, uniqueKeywords);
+      console.error(`[ERROR] Excluding:`, excludeLower);
       throw err;
     }
   }
@@ -798,30 +837,36 @@ class MicrosoftBot {
 
     // Close cookie popup if visible (France specific cookies dialog)
     await this.handleCookiePopup();
-    const clicked = await this.clickButtonWithPossibleNames([
-      'Set up account',
-      'Setup Account',
-      'Setup',
-      'Set up',
-      'Siapkan akun',
-      'Atur Akun',
-      'Siapkan Akun',
-      'Atur',
-      'Siapkan',
-      'Create new account',
-      'Create account',
-      'Buat akun baru',
-      'Buat akun',
-      'Crear cuenta nueva',
-      'Crear cuenta',
-      'Créer un compte',
-      'Configuration',
-      'Configurer le compte',
-      'Neues Konto erstellen',
-      'Crea nuovo account',
-      'Criar nova conta',
-      'Mulai',
-    ]);
+    const clicked = await this.clickButtonWithPossibleNames(
+      [
+        'Set up account',
+        'Setup Account',
+        'Setup',
+        'Set up',
+        'Siapkan akun',
+        'Atur Akun',
+        'Siapkan Akun',
+        'Atur',
+        'Siapkan',
+        'Create new account',
+        'Create account',
+        'Buat akun baru',
+        'Buat akun',
+        'Crear cuenta nueva',
+        'Crear cuenta',
+        'Créer un compte',
+        'Configuration',
+        'Configurer le compte',
+        'Neues Konto erstellen',
+        'Crea nuovo account',
+        'Criar nova conta',
+        'Mulai',
+      ],
+      {
+        // Exclude tombol yang ada hubungannya dengan cookie
+        excludeText: ['cookie', 'gérer', 'cookies', 'préférences', 'confidentialité'],
+      }
+    );
 
     if (!clicked) {
       console.warn('[STEP 7] Setup button not found — platform may have skipped it.');
@@ -831,54 +876,52 @@ class MicrosoftBot {
   }
 
   async handleCookiePopup() {
-    try {
-      // Tunggu dialog muncul dulu, tapi jangan terlalu lama
-      const dialog = this.page.locator('div[role="dialog"][aria-label*="cookie" i]').first();
-      const isVisible = await dialog.isVisible({ timeout: 5000 }).catch(() => false);
+    const MAX_WAIT_MS = 8000;
+    const CHECK_INTERVAL = 500;
+    const elapsed = { val: 0 };
 
-      if (!isVisible) {
-        console.log('[COOKIE] No cookie popup detected.');
+    // Poll sampai popup muncul atau timeout
+    let dialogVisible = false;
+    while (elapsed.val < MAX_WAIT_MS) {
+      const dialog = this.page
+        .locator(
+          'div[role="dialog"][aria-label*="cookie" i], div[role="dialog"][aria-modal="true"]'
+        )
+        .first();
+      dialogVisible = await dialog.isVisible().catch(() => false);
+      if (dialogVisible) break;
+      await this.page.waitForTimeout(CHECK_INTERVAL);
+      elapsed.val += CHECK_INTERVAL;
+    }
+
+    if (!dialogVisible) {
+      console.log('[COOKIE] No cookie popup detected.');
+      return;
+    }
+
+    console.log('[COOKIE] Cookie popup detected, closing...');
+
+    const closeStrategies = [
+      () => this.page.locator('button[aria-label="Fermer"]').first(),
+      () => this.page.locator('button').filter({ hasText: '✕' }).first(),
+      () => this.page.locator('button').filter({ hasText: '×' }).first(),
+      () =>
+        this.page.locator('button[aria-label*="close" i], button[aria-label*="fermer" i]').first(),
+    ];
+
+    for (const getLocator of closeStrategies) {
+      const btn = getLocator();
+      if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await btn.click({ force: true });
+        console.log('[COOKIE] Cookie popup closed.');
+        await this.page.waitForTimeout(800);
         return;
       }
-
-      console.log('[COOKIE] Cookie popup detected, closing...');
-
-      // Coba berbagai cara tutup popup, urutan dari paling spesifik
-      const closeStrategies = [
-        // Strategy 1: aria-label="Fermer" di dalam dialog
-        () => dialog.locator('button[aria-label="Fermer"]').first(),
-        // Strategy 2: aria-label="Fermer" anywhere
-        () => this.page.locator('button[aria-label="Fermer"]').first(),
-        // Strategy 3: button yang isinya ✕ (pakai Playwright filter)
-        () => this.page.locator('button').filter({ hasText: '✕' }).first(),
-        // Strategy 4: button yang isinya × (karakter berbeda)
-        () => this.page.locator('button').filter({ hasText: '×' }).first(),
-        // Strategy 5: Close button generic
-        () =>
-          this.page
-            .locator(
-              'button[aria-label*="close" i], button[aria-label*="fermer" i], button[aria-label*="tutup" i]'
-            )
-            .first(),
-      ];
-
-      for (const getLocator of closeStrategies) {
-        const btn = getLocator();
-        if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await btn.click({ force: true });
-          console.log('[COOKIE] Cookie popup closed.');
-          await this.page.waitForTimeout(800);
-          return;
-        }
-      }
-
-      // Fallback: tekan Escape
-      console.warn('[COOKIE] Close button not found, trying Escape key...');
-      await this.page.keyboard.press('Escape');
-      await this.page.waitForTimeout(500);
-    } catch (e) {
-      console.warn('[COOKIE] handleCookiePopup error:', e.message);
     }
+
+    console.warn('[COOKIE] Close button not found, trying Escape...');
+    await this.page.keyboard.press('Escape');
+    await this.page.waitForTimeout(500);
   }
 
   async fillBasicInfo() {
