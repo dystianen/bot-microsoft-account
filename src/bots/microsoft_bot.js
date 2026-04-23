@@ -2027,14 +2027,6 @@ class MicrosoftBot {
         "can't create your account",
         'cannot create your account',
         'identity could not be verified',
-        'Verification code',
-        'Kode verifikasi',
-        'Enter the code',
-        'Masukkan kode',
-        'Entrez le code',
-        'Kami telah mengirim kode',
-        'Nous avons envoyé le code',
-        'Code de vérification',
       ];
 
       for (const frame of this.page.frames()) {
