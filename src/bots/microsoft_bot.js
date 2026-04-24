@@ -990,19 +990,30 @@ class MicrosoftBot {
       await verifyBtn.click();
 
       await this.waitForSpinnerGone();
+
+      // Tunggu sebentar agar halaman sempat bereaksi
       await this.page.waitForTimeout(2000);
 
-      // Cek apakah input masih ada (berarti gagal/salah kode)
-      if (await otpInput.isVisible().catch(() => false)) {
-        console.warn('[OTP] Verification code might be wrong or not accepted.');
+      // Cek apakah ada pesan error eksplisit (kode salah)
+      const errorMsg = this.page
+        .locator(
+          '[data-automation-id="error-message"], [role="alert"], .ms-MessageBar--error, text=/code incorrect|incorrect code|code invalide|salah/i'
+        )
+        .first();
+      if (await errorMsg.isVisible({ timeout: 1000 }).catch(() => false)) {
+        console.warn('[OTP] Explicit error message detected — code was rejected.');
         return false;
       }
 
+      // Jika spinner sudah hilang dan TIDAK ada pesan error → dianggap sukses
+      // (Microsoft mungkin masih render input sebentar sebelum navigasi)
+      console.log('[OTP] No error detected after submit. Treating as success.');
       return true;
     } catch (err) {
       console.error('[OTP] Error filling code:', err.message);
       return false;
     }
+
   }
 
   async handleOtpWithMailporary() {
