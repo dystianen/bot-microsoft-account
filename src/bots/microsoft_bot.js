@@ -25,10 +25,11 @@ class MicrosoftBot {
 
   async _logStep(stepNum, msg) {
     this.currentStep = stepNum;
-    const email = this.accountConfig.microsoftAccount.email;
-    // JANGAN di-await agar bot tidak berhenti/hang jika antrean log Telegram menumpuk
+    const email = this.accountConfig.microsoftAccount.email || 'New Account';
+    // Gunakan stepNum sebagai angka agar tidak NaN di logger
+    const numericStep = typeof stepNum === 'number' ? stepNum : 0;
     remoteLogger
-      .logStep(email, stepNum, msg)
+      .logStep(email, numericStep, msg)
       .catch((e) => console.error(`[LOG ERROR] ${e.message}`));
   }
 
@@ -2297,9 +2298,10 @@ class MicrosoftBot {
     }
   }
 
-  async executeStep(name, fn, delay = null) {
-    console.log(`[STEP] ${name}`);
+  async executeStep(name, stepIndex, fn, delay = null) {
+    console.log(`[STEP ${stepIndex}] ${name}`);
     this._currentStep = name;
+    this._currentStepIndex = stepIndex;
     const result = await fn();
     // Tunggu spinner hilang
     await this.waitForSpinnerGone();
@@ -2324,24 +2326,31 @@ class MicrosoftBot {
   async run() {
     this._currentStep = 'Initializing';
     try {
-      await this.executeStep('Connecting to browser', () => this.connect(), [1000, 3000]);
+      await this.executeStep('Connecting to browser', 1, () => this.connect(), [1000, 3000]);
 
       // Ambil email dari Mailporary jika tidak ada di config atau diminta khusus
       if (!this.accountConfig.microsoftAccount.email || this.accountConfig.useMailporary) {
         await this.executeStep(
           'Fetching initial email from Mailporary',
+          2,
           () => this.fetchNewEmailFromMailporary(),
           [500, 1000]
         );
       }
 
-      await this.executeStep('Opening Microsoft page', () => this.openMicrosoftPage(), [400, 800]);
+      await this.executeStep(
+        'Opening Microsoft page',
+        3,
+        () => this.openMicrosoftPage(),
+        [400, 800]
+      );
       await this.executeStep(
         'Clicking Try for free for target plan',
+        4,
         () => this.clickTryForFreeOnTargetCard(),
         [500, 1000]
       );
-      // --- Setup Phase (Steps 4-7) with Retry for OTP/Rate-limit ---
+      // --- Setup Phase (Steps 5-7) with Retry for OTP/Rate-limit ---
       let setupDone = false;
       let setupAttempts = 0;
       const MAX_SETUP_RETRIES = 5;
@@ -2355,20 +2364,23 @@ class MicrosoftBot {
 
           await this.executeStep(
             'Clicking product page Next',
+            5,
             () => this.clickProductNextButton(),
             [300, 600]
           );
 
-          await this.executeStep('Filling email', () => this.fillEmail(), [1000, 2500]);
+          await this.executeStep('Filling email', 6, () => this.fillEmail(), [1000, 2500]);
 
           await this.executeStep(
             'Submitting email & waiting for Setup',
+            7,
             () => this.submitEmailAndWaitForSetup(),
             [400, 800]
           );
 
           const setupResult = await this.executeStep(
             'Clicking Setup Account button',
+            8,
             () => this.clickSetupAccountButton(),
             [400, 800]
           );
@@ -2402,20 +2414,23 @@ class MicrosoftBot {
           `Failed to complete setup after ${MAX_SETUP_RETRIES} attempts due to persistent OTP/Rate-limits.`
         );
       }
-      await this.executeStep('Filling basic info', () => this.fillBasicInfo(), [1500, 3500]);
+      await this.executeStep('Filling basic info', 9, () => this.fillBasicInfo(), [1500, 3500]);
       await this.executeStep(
         'Confirming address (pre-password)',
-        () => this.confirmAddressIfPrompted(9, 'Mengecek konfirmasi alamat (awal)...'),
+        10,
+        () => this.confirmAddressIfPrompted(10, 'Mengecek konfirmasi alamat (awal)...'),
         [300, 600]
       );
-      await this.executeStep('Filling password', () => this.fillPassword(), [400, 800]);
+      await this.executeStep('Filling password', 11, () => this.fillPassword(), [400, 800]);
       await this.executeStep(
         'Handling optional Sign In',
+        12,
         () => this.handleOptionalSignIn(),
         [400, 800]
       );
       await this.executeStep(
         'Navigating to payment page',
+        13,
         async () => {
           await this.humanScroll();
           await this.randomMouseMove();
@@ -2425,15 +2440,17 @@ class MicrosoftBot {
       );
       await this.executeStep(
         'Filling VCC payment details',
+        14,
         () => this.fillPaymentDetails(),
         [400, 800]
       );
-      await this.executeStep('Submitting payment & waiting result', () =>
+      await this.executeStep('Submitting payment & waiting result', 15, () =>
         this.submitPaymentAndWaitResult()
       );
       await this.executeStep(
         'Confirming address (post-payment)',
-        () => this.confirmAddressIfPrompted(15, 'Mengecek konfirmasi alamat (post-payment)...'),
+        16,
+        () => this.confirmAddressIfPrompted(16, 'Mengecek konfirmasi alamat (post-payment)...'),
         [300, 600]
       );
 
@@ -2447,11 +2464,13 @@ class MicrosoftBot {
 
       await this.executeStep(
         'Accepting trial & clicking Start',
+        17,
         () => this.acceptTrialAndStart(),
         [800, 1500]
       );
       await this.executeStep(
         'Clicking Get Started',
+        18,
         () => this.clickGetStartedButton(),
         [800, 1500]
       );
