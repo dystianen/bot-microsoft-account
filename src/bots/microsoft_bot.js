@@ -883,6 +883,7 @@ class MicrosoftBot {
 
       console.log(`[MAILPORARY] Email acquired: ${finalEmail}`);
       this.accountConfig.microsoftAccount.email = finalEmail;
+      this._emailFromMailporary = true; // Tandai bahwa email ini dari Mailporary
       await this._logStep(
         this._currentStep || 6,
         `📧 <b>${finalEmail}</b>: Email baru didapat: <code>${finalEmail}</code>`
@@ -1099,22 +1100,30 @@ class MicrosoftBot {
 
     await this.page.waitForTimeout(800);
 
-    // 1. Handle OTP Kedua → buka inbox Mailporary, ambil kode, isi
+    // 1. Handle OTP muncul setelah klik Setup
     if (await secondOtpTrigger.isVisible({ timeout: 3000 }).catch(() => false)) {
-      console.log('[OTP] Second verification code detected! Reading from Mailporary inbox...');
-      const code = await this.readOtpFromMailporary();
-      if (code) {
-        const solved = await this.fillMicrosoftOtp(code);
-        if (solved) {
-          console.log('[OTP] Second verification code solved successfully. Continuing flow.');
-          await this.waitForSpinnerGone();
-          return 'SUCCESS';
+      if (this._emailFromMailporary) {
+        // Email berasal dari Mailporary → baca kode OTP dari inbox
+        console.log('[OTP] Second verification code detected! Reading from Mailporary inbox...');
+        const code = await this.readOtpFromMailporary();
+        if (code) {
+          const solved = await this.fillMicrosoftOtp(code);
+          if (solved) {
+            console.log('[OTP] Second verification code solved successfully. Continuing flow.');
+            await this.waitForSpinnerGone();
+            return 'SUCCESS';
+          }
         }
+        // Gagal baca OTP → reset total
+        console.warn('[OTP] Could not solve second OTP. Falling back to reset flow...');
+        await this.handleOtpWithMailporary();
+        return 'RETRY';
+      } else {
+        // Email BUKAN dari Mailporary (email asli config) → ambil email baru dari Mailporary dulu
+        console.log('[OTP] Verification code detected but email is NOT from Mailporary. Fetching Mailporary email and restarting setup...');
+        await this.fetchNewEmailFromMailporary();
+        return 'RETRY';
       }
-      // Gagal baca OTP → reset total
-      console.warn('[OTP] Could not solve second OTP. Falling back to reset flow...');
-      await this.handleOtpWithMailporary();
-      return 'RETRY';
     }
 
     // 2. Handle Rate Limit
