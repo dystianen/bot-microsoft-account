@@ -803,13 +803,13 @@ class MicrosoftBot {
     }
   }
 
-  async handleOtpWithMailporary() {
-    await this._logStep(
-      `🔄 <b>${this.accountConfig.id}</b>: Opening Mailporary to get new email...`
-    );
-    console.log('[OTP] Opening Mailporary to get new email...');
+  /**
+   * Mengambil email baru dari Mailporary
+   */
+  async fetchNewEmailFromMailporary() {
+    await this._logStep(`📧 <b>${this.accountConfig.id}</b>: Membuka Mailporary untuk email baru...`);
+    console.log('[MAILPORARY] Opening Mailporary to get email...');
 
-    // 1. Buka tab mailporary
     const mailporaryPage = await this.page.context().newPage();
     try {
       await mailporaryPage.goto('https://mailporary.com/', {
@@ -817,11 +817,9 @@ class MicrosoftBot {
         timeout: HARD_TIMEOUT,
       });
 
-      // 2. Tunggu input email muncul
       const emailInput = mailporaryPage.locator('input[aria-label="Email Address"]');
       await emailInput.waitFor({ state: 'visible', timeout: 15000 });
 
-      // Poll value langsung via evaluate agar lebih cepat
       const newEmail = await mailporaryPage.evaluate(async (timeout) => {
         const start = Date.now();
         while (Date.now() - start < timeout) {
@@ -846,19 +844,127 @@ class MicrosoftBot {
         throw new Error('Failed to extract valid email from Mailporary');
       }
 
-      console.log(`[OTP] Copied new email: ${finalEmail}`);
-      await this._logStep(
-        `📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${finalEmail}</code>`
-      );
-
-      // Update config agar proses selanjutnya pakai email ini
+      console.log(`[MAILPORARY] Email acquired: ${finalEmail}`);
       this.accountConfig.microsoftAccount.email = finalEmail;
+      await this._logStep(
+        `📧 <b>${this.accountConfig.id}</b>: Email baru didapat: <code>${finalEmail}</code>`
+      );
+      return finalEmail;
     } finally {
-      // 3. Close tab mailporary
       await mailporaryPage.close().catch(() => {});
     }
+  }
 
-    // 4. Refresh page Microsoft asli
+  /**
+   * Membaca kode OTP dari Mailporary untuk email saat ini
+   */
+  async readOtpFromMailporary() {
+    await this._logStep(`🔍 <b>${this.accountConfig.id}</b>: Menunggu kode OTP di Mailporary...`);
+    console.log('[OTP] Waiting for verification code from Mailporary...');
+
+    const mailporaryPage = await this.page.context().newPage();
+    try {
+      await mailporaryPage.goto('https://mailporary.com/', {
+        waitUntil: 'domcontentloaded',
+        timeout: HARD_TIMEOUT,
+      });
+
+      let code = null;
+      const MAX_POLL_ATTEMPTS = 12; // ~1 menit total
+
+      for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+        console.log(`[OTP] Checking inbox (Attempt ${i + 1}/${MAX_POLL_ATTEMPTS})...`);
+
+        // Selector untuk baris pesan (berdasarkan screenshot)
+        const messageRow = mailporaryPage
+          .locator('text=/Vérifiez votre adresse e-mail|Microsoft/i')
+          .first();
+
+        if (await messageRow.isVisible().catch(() => false)) {
+          console.log('[OTP] Verification email detected, clicking...');
+          await messageRow.click();
+
+          // Tunggu konten muncul (Sesuai HTML: <h3 ...>944920</h3>)
+          const codeLocator = mailporaryPage
+            .locator('.emailBody h3, h3')
+            .filter({ hasText: /^\d{6}$/ })
+            .first();
+
+          try {
+            await codeLocator.waitFor({ state: 'visible', timeout: 10000 });
+            const extracted = await codeLocator.textContent();
+            if (extracted && extracted.trim().match(/^\d{6}$/)) {
+              code = extracted.trim();
+              console.log(`[OTP] Successfully extracted code: ${code}`);
+              break;
+            }
+          } catch (e) {
+            console.warn('[OTP] Code not found in body yet, refreshing page...');
+            await mailporaryPage.reload({ waitUntil: 'domcontentloaded' });
+            continue;
+          }
+        }
+
+        // Klik tombol Actualiser (Refresh)
+        const refreshBtn = mailporaryPage
+          .locator('button:has-text("Actualiser"), button:has-text("Refresh"), button:has-text("Update")')
+          .first();
+        if (await refreshBtn.isVisible()) {
+          await refreshBtn.click();
+        } else {
+          await mailporaryPage.reload({ waitUntil: 'domcontentloaded' });
+        }
+
+        await mailporaryPage.waitForTimeout(5000);
+      }
+
+      return code;
+    } finally {
+      await mailporaryPage.close().catch(() => {});
+    }
+  }
+
+  /**
+   * Mengisi kode OTP ke halaman Microsoft
+   */
+  async fillMicrosoftOtp(code) {
+    try {
+      await this._logStep(7, `⌨️ Memasukkan kode verifikasi: ${code}`);
+      const otpInput = this.page
+        .locator('input[id*="verification" i], input[name*="code" i], input[aria-label*="code" i]')
+        .first();
+      await otpInput.waitFor({ state: 'visible', timeout: 10000 });
+
+      await this.humanType(otpInput, code);
+      await this.page.waitForTimeout(500);
+
+      const verifyBtn = this.page
+        .locator(
+          'button[data-bi-id="VerifyCode"], button:has-text("Verify"), button:has-text("Vérifier"), button:has-text("Verifikasi")'
+        )
+        .first();
+      await verifyBtn.click();
+
+      await this.waitForSpinnerGone();
+      await this.page.waitForTimeout(2000);
+
+      // Cek apakah input masih ada (berarti gagal/salah kode)
+      if (await otpInput.isVisible().catch(() => false)) {
+        console.warn('[OTP] Verification code might be wrong or not accepted.');
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('[OTP] Error filling code:', err.message);
+      return false;
+    }
+  }
+
+  async handleOtpWithMailporary() {
+    await this.fetchNewEmailFromMailporary();
+
+    // Refresh page Microsoft asli
     const refreshMsg = '[OTP] Refreshing Microsoft page for retry...';
     console.log(refreshMsg);
     await this._logStep(`🔄 <b>${this.accountConfig.id}</b>: ${refreshMsg}`);
@@ -917,32 +1023,40 @@ class MicrosoftBot {
     await this.page.waitForTimeout(1000);
 
     // Cek apakah muncul OTP atau Error "Too many requests" setelah klik Setup
-    const resetTrigger = this.page
+    const otpTrigger = this.page
       .locator('button[data-bi-id="VerifyCode"]')
       .or(
         this.page.locator(
-          'button:has-text("Verifikasi"), button:has-text("Verify"), button:has-text("Vérifier")'
-        )
-      )
-      .or(
-        this.page.locator(
-          'label:has-text("Code de vérification"), label:has-text("Verification code"), label:has-text("Kode verifikasi")'
-        )
-      )
-      .or(
-        this.page.locator(
-          'text=/Verification code|Enter the code|Kode verifikasi|Masukkan kode|Kami telah mengirim kode|Code de vérification|Entrez le code|Nous avons envoyé le code/i'
-        )
-      )
-      .or(
-        this.page.locator(
-          'text=/requêtes trop élevé|too many requests|reached the limit|jumlah permintaan terlalu tinggi/i'
+          'label:has-text("Verification code"), label:has-text("Kode verifikasi"), label:has-text("Code de vérification")'
         )
       )
       .first();
 
-    if (await resetTrigger.isVisible({ timeout: 10000 }).catch(() => false)) {
-      const msg = '[WARN] OTP or Rate-limit detected AFTER Setup Click! Resetting...';
+    const rateLimitTrigger = this.page
+      .locator(
+        'text=/too many requests|reached the limit|jumlah permintaan terlalu tinggi|requêtes trop élevé/i'
+      )
+      .first();
+
+    // 1. Handle OTP (Verification Code)
+    if (await otpTrigger.isVisible({ timeout: 10000 }).catch(() => false)) {
+      console.log('[OTP] Verification code detected! Attempting to solve via Mailporary...');
+      const code = await this.readOtpFromMailporary();
+      if (code) {
+        const solved = await this.fillMicrosoftOtp(code);
+        if (solved) {
+          console.log('[OTP] Verification code solved successfully.');
+          return 'SUCCESS';
+        }
+      }
+      console.warn('[OTP] Could not solve OTP. Falling back to reset flow...');
+      await this.handleOtpWithMailporary();
+      return 'RETRY';
+    }
+
+    // 2. Handle Rate Limit
+    if (await rateLimitTrigger.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const msg = '[WARN] Rate-limit detected AFTER Setup Click! Resetting...';
       console.warn(msg);
       await this._logStep(7, msg);
       await this.handleOtpWithMailporary();
@@ -2161,6 +2275,16 @@ class MicrosoftBot {
     this._currentStep = 'Initializing';
     try {
       await this.executeStep('Connecting to browser', () => this.connect(), [1000, 3000]);
+
+      // Ambil email dari Mailporary jika tidak ada di config atau diminta khusus
+      if (!this.accountConfig.microsoftAccount.email || this.accountConfig.useMailporary) {
+        await this.executeStep(
+          'Fetching initial email from Mailporary',
+          () => this.fetchNewEmailFromMailporary(),
+          [500, 1000]
+        );
+      }
+
       await this.executeStep('Opening Microsoft page', () => this.openMicrosoftPage(), [400, 800]);
       await this.executeStep(
         'Clicking Try for free for target plan',
