@@ -813,63 +813,65 @@ class MicrosoftBot {
     const mailporaryPage = await this.page.context().newPage();
     try {
       await mailporaryPage.goto('https://mailporary.com/', {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: HARD_TIMEOUT,
       });
 
-      // 2. Tunggu input email muncul dan ambil nilainya
+      // 2. Tunggu input email muncul
       const emailInput = mailporaryPage.locator('input[aria-label="Email Address"]');
-      await emailInput.waitFor({ state: 'visible', timeout: HARD_TIMEOUT });
+      await emailInput.waitFor({ state: 'visible', timeout: 15000 });
 
-      // Tunggu sampai value benar-benar ada isinya (bukan loading)
-      await mailporaryPage.waitForFunction(
-        () => {
+      // Poll value langsung via evaluate agar lebih cepat
+      const newEmail = await mailporaryPage.evaluate(async (timeout) => {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
           const input = document.querySelector('input[aria-label="Email Address"]');
-          // Tambah check: bukan string "loading", punya domain valid, minimal ada titik setelah @
-          return (
-            input &&
-            input.value &&
-            input.value.includes('@') &&
-            !input.value.toLowerCase().includes('loading') &&
-            input.value.split('@')[1]?.includes('.')
-          );
-        },
-        { timeout: HARD_TIMEOUT }
-      );
+          const val = input ? input.value : '';
+          if (
+            val &&
+            val.includes('@') &&
+            !val.toLowerCase().includes('loading') &&
+            val.split('@')[1]?.includes('.')
+          ) {
+            return val;
+          }
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        return null;
+      }, 30000);
 
-      const newEmail = await emailInput.inputValue();
+      const finalEmail = newEmail || (await emailInput.inputValue().catch(() => ''));
 
-      if (!newEmail || !newEmail.includes('@')) {
+      if (!finalEmail || !finalEmail.includes('@')) {
         throw new Error('Failed to extract valid email from Mailporary');
       }
 
-      console.log(`[OTP] Copied new email: ${newEmail}`);
+      console.log(`[OTP] Copied new email: ${finalEmail}`);
       await this._logStep(
-        `📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${newEmail}</code>`
+        `📧 <b>${this.accountConfig.id}</b>: Copied new email: <code>${finalEmail}</code>`
       );
 
       // Update config agar proses selanjutnya pakai email ini
-      this.accountConfig.microsoftAccount.email = newEmail;
+      this.accountConfig.microsoftAccount.email = finalEmail;
     } finally {
       // 3. Close tab mailporary
       await mailporaryPage.close().catch(() => {});
     }
 
     // 4. Refresh page Microsoft asli
-    const refreshMsg = '[OTP] Refreshing Microsoft page and restarting flow...';
+    const refreshMsg = '[OTP] Refreshing Microsoft page for retry...';
     console.log(refreshMsg);
     await this._logStep(`🔄 <b>${this.accountConfig.id}</b>: ${refreshMsg}`);
     await this.page.reload({ waitUntil: 'domcontentloaded', timeout: HARD_TIMEOUT });
 
-    // 5. Balik lagi ke action clickProductNextButton
-    await this.clickProductNextButton();
+    // Note: clickProductNextButton is now handled by the main run() loop retry logic
   }
 
   async clickSetupAccountButton() {
     // false = form biodata sudah langsung muncul, tidak perlu klik setup
     if (this._setupBtnReady === false) {
       console.log('[STEP 7] Setup skipped: basic info form already visible.');
-      return;
+      return 'SUCCESS';
     }
 
     await this._logStep(7, 'Mengklik tombol Setup Account...');
@@ -944,10 +946,11 @@ class MicrosoftBot {
       console.warn(msg);
       await this._logStep(7, msg);
       await this.handleOtpWithMailporary();
-      return;
+      return 'RETRY';
     }
 
     this._setupBtnReady = false;
+    return 'SUCCESS';
   }
 
   async handleCookiePopup() {
@@ -2133,7 +2136,7 @@ class MicrosoftBot {
   async executeStep(name, fn, delay = null) {
     console.log(`[STEP] ${name}`);
     this._currentStep = name;
-    await fn();
+    const result = await fn();
     // Tunggu spinner hilang
     await this.waitForSpinnerGone();
     // ✅ Double-check error: beri jeda 1.5 detik lalu cek ulang
@@ -2151,6 +2154,7 @@ class MicrosoftBot {
       console.log(`[executeStep] False positive cleared after re-check.`);
     }
     if (delay) await this.humanDelay(...delay);
+    return result;
   }
 
   async run() {
@@ -2163,22 +2167,52 @@ class MicrosoftBot {
         () => this.clickTryForFreeOnTargetCard(),
         [500, 1000]
       );
-      await this.executeStep(
-        'Clicking product page Next',
-        () => this.clickProductNextButton(),
-        [300, 600]
-      );
-      await this.executeStep('Filling email', () => this.fillEmail(), [1000, 2500]);
-      await this.executeStep(
-        'Submitting email & waiting for Setup',
-        () => this.submitEmailAndWaitForSetup(),
-        [400, 800]
-      );
-      await this.executeStep(
-        'Clicking Setup Account button',
-        () => this.clickSetupAccountButton(),
-        [400, 800]
-      );
+      // --- Setup Phase (Steps 4-7) with Retry for OTP/Rate-limit ---
+      let setupDone = false;
+      let setupAttempts = 0;
+      const MAX_SETUP_RETRIES = 5;
+
+      while (!setupDone && setupAttempts < MAX_SETUP_RETRIES) {
+        setupAttempts++;
+        if (setupAttempts > 1) {
+          console.log(`[RETRY] Starting setup retry attempt #${setupAttempts}...`);
+        }
+
+        await this.executeStep(
+          'Clicking product page Next',
+          () => this.clickProductNextButton(),
+          [300, 600]
+        );
+
+        await this.executeStep('Filling email', () => this.fillEmail(), [1000, 2500]);
+
+        await this.executeStep(
+          'Submitting email & waiting for Setup',
+          () => this.submitEmailAndWaitForSetup(),
+          [400, 800]
+        );
+
+        const setupResult = await this.executeStep(
+          'Clicking Setup Account button',
+          () => this.clickSetupAccountButton(),
+          [400, 800]
+        );
+
+        if (setupResult === 'RETRY') {
+          console.log(
+            `[RETRY] OTP/Rate-limit hit on attempt ${setupAttempts}. Flow restarted with new email.`
+          );
+          continue;
+        }
+
+        setupDone = true;
+      }
+
+      if (!setupDone) {
+        throw new Error(
+          `Failed to complete setup after ${MAX_SETUP_RETRIES} attempts due to persistent OTP/Rate-limits.`
+        );
+      }
       await this.executeStep('Filling basic info', () => this.fillBasicInfo(), [1500, 3500]);
       await this.executeStep(
         'Confirming address (pre-password)',
