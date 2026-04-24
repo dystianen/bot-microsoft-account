@@ -26,11 +26,10 @@ class MicrosoftBot {
 
   async _logStep(stepNum, msg) {
     this.currentStep = stepNum;
-    // Gunakan email original sebagai key agar Telegram meng-update pesan yang sama (bukan buat baru)
-    const logKey = this.originalEmail;
+    const email = this.accountConfig.microsoftAccount.email || 'New Account';
     const numericStep = typeof stepNum === 'number' ? stepNum : 0;
     remoteLogger
-      .logStep(logKey, numericStep, msg)
+      .logStep(email, numericStep, msg)
       .catch((e) => console.error(`[LOG ERROR] ${e.message}`));
   }
 
@@ -803,7 +802,7 @@ class MicrosoftBot {
   async fetchNewEmailFromMailporary(forceNew = false) {
     const logEmail = this.accountConfig.microsoftAccount.email || 'New Account';
     await this._logStep(
-      this._currentStep || 0,
+      this._currentStepIndex || 0,
       `📧 <b>${logEmail}</b>: Membuka Mailporary untuk email baru...`
     );
     console.log(`[MAILPORARY] Opening Mailporary (forceNew: ${forceNew})...`);
@@ -855,7 +854,15 @@ class MicrosoftBot {
       }
 
       console.log(`[MAILPORARY] Email acquired: ${finalEmail}`);
+
+      // Migrate log session agar Processing: [email] berubah tapi pesan tetap di-edit (bukan kirim baru)
+      const oldEmail = this.accountConfig.microsoftAccount.email;
+      if (oldEmail && oldEmail !== finalEmail) {
+        remoteLogger.migrateSession(oldEmail, finalEmail);
+      }
+
       this.accountConfig.microsoftAccount.email = finalEmail;
+      this.originalEmail = finalEmail; // Update originalEmail agar logKey selanjutnya pakai email baru
       this._emailFromMailporary = true; // Tandai bahwa email ini dari Mailporary
       await this._logStep(
         this._currentStep || 6,

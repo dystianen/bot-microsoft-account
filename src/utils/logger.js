@@ -135,6 +135,7 @@ class RemoteLogger {
           chat_id: this.chatId,
           text: truncated,
           parse_mode: 'HTML',
+          is_final: isFinal,
         });
         if (resp?.data?.result?.message_id) {
           this.sessionMap.set(email, resp.data.result.message_id);
@@ -143,6 +144,20 @@ class RemoteLogger {
         if (isFinal) this.sessionMap.delete(email);
       }
     });
+  }
+
+  /**
+   * Mengalihkan sesi pesan Telegram dari email lama ke email baru
+   * agar pesan yang sama bisa di-update meskipun key-nya berubah.
+   */
+  migrateSession(oldEmail, newEmail) {
+    if (!oldEmail || !newEmail || oldEmail === newEmail) return;
+    const messageId = this.sessionMap.get(oldEmail);
+    if (messageId) {
+      this.sessionMap.set(newEmail, messageId);
+      this.sessionMap.delete(oldEmail);
+      console.log(`[RemoteLogger] Session migrated: ${oldEmail} -> ${newEmail}`);
+    }
   }
 
   getProgressBar(current, total = 18) {
