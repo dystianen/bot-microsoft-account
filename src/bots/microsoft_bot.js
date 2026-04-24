@@ -806,10 +806,10 @@ class MicrosoftBot {
   /**
    * Mengambil email baru dari Mailporary
    */
-  async fetchNewEmailFromMailporary() {
+  async fetchNewEmailFromMailporary(forceNew = false) {
     const logEmail = this.accountConfig.microsoftAccount.email || 'New Account';
     await this._logStep(`📧 <b>${logEmail}</b>: Membuka Mailporary untuk email baru...`);
-    console.log('[MAILPORARY] Opening Mailporary to get email...');
+    console.log(`[MAILPORARY] Opening Mailporary (forceNew: ${forceNew})...`);
 
     const mailporaryPage = await this.page.context().newPage();
     try {
@@ -817,6 +817,18 @@ class MicrosoftBot {
         waitUntil: 'domcontentloaded',
         timeout: HARD_TIMEOUT,
       });
+
+      // Jika forceNew, klik tombol "Supprimer" (Delete) untuk ganti email
+      if (forceNew) {
+        console.log('[MAILPORARY] Resetting email address via "Supprimer"...');
+        const deleteBtn = mailporaryPage
+          .locator('button:has-text("Supprimer"), button:has-text("Delete")')
+          .first();
+        if (await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+          await deleteBtn.click();
+          await mailporaryPage.waitForTimeout(2000);
+        }
+      }
 
       const emailInput = mailporaryPage.locator('input[aria-label="Email Address"]');
       await emailInput.waitFor({ state: 'visible', timeout: 15000 });
@@ -964,7 +976,8 @@ class MicrosoftBot {
   }
 
   async handleOtpWithMailporary() {
-    await this.fetchNewEmailFromMailporary();
+    // Paksa ambil email baru (delete yang lama) saat reset
+    await this.fetchNewEmailFromMailporary(true);
 
     const logEmail = this.accountConfig.microsoftAccount.email || 'Account';
     // Refresh page Microsoft asli
