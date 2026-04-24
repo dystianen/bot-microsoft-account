@@ -17,6 +17,7 @@ class MicrosoftBot {
     this.context = null;
     this.page = null;
     this.accountConfig = accountConfig;
+    this.originalEmail = accountConfig.microsoftAccount.email || 'New Account';
     this.onPaymentSaved = onPaymentSaved;
     this._paymentSavedTriggered = false;
     this.currentStep = 0;
@@ -25,11 +26,11 @@ class MicrosoftBot {
 
   async _logStep(stepNum, msg) {
     this.currentStep = stepNum;
-    const email = this.accountConfig.microsoftAccount.email || 'New Account';
-    // Gunakan stepNum sebagai angka agar tidak NaN di logger
+    // Gunakan email original sebagai key agar Telegram meng-update pesan yang sama (bukan buat baru)
+    const logKey = this.originalEmail;
     const numericStep = typeof stepNum === 'number' ? stepNum : 0;
     remoteLogger
-      .logStep(email, numericStep, msg)
+      .logStep(logKey, numericStep, msg)
       .catch((e) => console.error(`[LOG ERROR] ${e.message}`));
   }
 
