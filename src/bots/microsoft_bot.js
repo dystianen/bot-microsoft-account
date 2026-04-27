@@ -3,6 +3,7 @@ const fs = require('fs');
 const config = require('../config');
 const remoteLogger = require('../utils/logger');
 const i18n = require('../utils/i18n');
+const browserHelper = require('../utils/browser_helper');
 
 // Dynamically build SPINNER_SELECTOR using all configured variations
 const spinnerTexts = i18n.getAllVariations('selectors.spinner_text');
@@ -57,90 +58,33 @@ class MicrosoftBot {
 
   // ─── Core helpers ────────────────────────────────────────────────────────────
 
+  // ─── Core helpers (Delegated to browserHelper) ───────────────────────────────
+
   async humanDelay(min = 1000, max = 3000) {
-    const delay = Math.floor(Math.random() * (max - min + 1) + min);
-    await this.page.waitForTimeout(delay);
+    await browserHelper.humanDelay(this.page, min, max);
   }
 
   async humanScroll() {
-    try {
-      const direction = Math.random() > 0.5 ? 1 : -1;
-      const distance = Math.floor(Math.random() * 300) + 100;
-      await this.page.mouse.wheel(0, direction * distance);
-      await this.humanDelay(500, 1200);
-    } catch (e) {
-      // Ignore scroll errors
-    }
+    await browserHelper.humanScroll(this.page);
   }
 
-  // Clipboard paste — lebih cepat & tidak terpengaruh proxy/lag
   async humanPaste(locator, text) {
-    if (!text) return;
-    await locator.click({ force: true }).catch(() => {});
-    await this.page.waitForTimeout(100);
-    await locator.fill(''); // clear dulu
-    await this.page.waitForTimeout(50);
-    await this.page.evaluate((val) => {
-      const el = document.activeElement;
-      if (el) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype,
-          'value'
-        )?.set;
-        if (nativeInputValueSetter) {
-          nativeInputValueSetter.call(el, val);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      }
-    }, text);
-    // Verifikasi hasil paste
-    const current = await locator.inputValue().catch(() => '');
-    if (current !== text) {
-      // Fallback ke fill biasa jika paste gagal
-      await locator.fill(text);
-    }
+    await browserHelper.humanPaste(this.page, locator, text);
   }
 
   async humanType(locator, text) {
-    if (!text) return;
-    await locator.click({ force: true }).catch(() => {});
-    await this.page.waitForTimeout(100);
-    await locator.fill('');
-    // Mengetik dengan delay acak antar karakter (30ms - 90ms) agar terasa natural tapi tetap cepat
-    await locator.pressSequentially(text, {
-      delay: Math.floor(Math.random() * 60) + 30,
-    });
+    await browserHelper.humanType(this.page, locator, text);
   }
 
   async humanClick(locator, options = {}) {
-    await this.randomMouseMove();
-    await locator.hover({ force: true }).catch(() => {});
-    await this.page.waitForTimeout(300);
-    await locator.click({ force: true, ...options });
-    await this.page.waitForTimeout(200);
+    await browserHelper.humanClick(this.page, locator, options);
   }
 
   async randomMouseMove() {
-    try {
-      const { width, height } = this.page.viewportSize() || {
-        width: 1280,
-        height: 720,
-      };
-
-      const x = Math.floor(Math.random() * width);
-      const y = Math.floor(Math.random() * height);
-
-      // CPU Saver: Use fewer steps for movement (2-4 steps instead of 10-25) to reduce CDP event flooding
-      const steps = Math.floor(Math.random() * 3) + 2;
-      await this.page.mouse.move(x, y, { steps });
-    } catch (e) {}
+    await browserHelper.randomMouseMove(this.page);
   }
 
-  async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
+  async runWithMonitor(promise) {
     let isDone = false;
     let errorMsg = null;
 
@@ -219,263 +163,44 @@ class MicrosoftBot {
   }
 
   async waitForVisible(locator) {
-    await this.waitForSpinnerGone();
-    await this.runWithMonitor(locator.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
+    await browserHelper.waitForVisible(this.page, locator, {
+      waitForSpinnerGone: () => this.waitForSpinnerGone(),
+      runWithMonitor: (p) => this.runWithMonitor(p),
+      hardTimeout: HARD_TIMEOUT,
+    });
   }
 
   async clickButtonWithPossibleNames(names, options = {}) {
-    await this.waitForSpinnerGone();
-
-    const { excludeText = [] } = options;
-
-    // Normalize exclude keywords
-    const excludeLower = excludeText.map((e) => e.trim().toLowerCase());
-
-    // ✅ Partial keyword matching — pecah tiap name jadi kata-katanya
-    const keywords = names.flatMap((n) => n.trim().toLowerCase().split(/\s+/));
-    const uniqueKeywords = [...new Set(keywords)];
-
-    const found = await this.page.evaluate(
-      ({ keywords, excludeLower }) => {
-        const candidates = [
-          ...document.querySelectorAll(
-            'button, [role="button"], a, input[type="button"], input[type="submit"], [class*="ms-Button"], [class*="btn"]'
-          ),
-        ];
-
-        const el = candidates.find((b) => {
-          const text = (b.textContent || b.value || b.getAttribute('aria-label') || '')
-            .trim()
-            .toLowerCase();
-
-          if (text.length === 0 || text.length >= 60) return false;
-
-          // ❌ Skip jika mengandung excluded keyword
-          if (excludeLower.some((ex) => text.includes(ex))) return false;
-
-          // ✅ Match jika ada keyword yang cocok
-          return keywords.some((kw) => text.includes(kw));
-        });
-
-        if (!el) return null;
-
-        el.click();
-        return el.textContent?.trim() || el.value || 'unknown';
-      },
-      { keywords: uniqueKeywords, excludeLower }
-    );
-
-    if (found) {
-      console.log(`[INFO] Clicked: "${found}"`);
-      return true;
-    }
-
-    // Fallback: Playwright dengan pattern original
-    console.log('[WARN] JS click not found, fallback to Playwright...');
-    const pattern = new RegExp(
-      names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*')).join('|'),
-      'i'
-    );
-
-    // Playwright fallback juga perlu filter exclude
-    const allButtonLocators = this.page.getByRole('button', { name: pattern });
-    const count = await allButtonLocators.count();
-
-    let button = null;
-    for (let i = 0; i < count; i++) {
-      const candidate = allButtonLocators.nth(i);
-      const text = (await candidate.textContent().catch(() => '')).trim().toLowerCase();
-      if (excludeLower.some((ex) => text.includes(ex))) {
-        console.log(`[CLICK] Skipping excluded button (Playwright): "${text}"`);
-        continue;
-      }
-      button = candidate;
-      break;
-    }
-
-    // Kalau semua excluded atau tidak ada, fallback ke .first()
-    if (!button) {
-      button = allButtonLocators.first();
-    }
-
-    try {
-      await this.runWithMonitor(button.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
-      await this.humanClick(button, { timeout: HARD_TIMEOUT });
-      const clickedText = await button.textContent().catch(() => 'unknown');
-      console.log(`[INFO] Clicked: "${clickedText?.trim()}"`);
-      return true;
-    } catch (err) {
-      // Last ditch effort: search in all frames
-      console.log('[DEBUG] Searching for button in frames...');
-      for (const frame of this.page.frames()) {
-        try {
-          const frameButton = frame.getByRole('button', { name: pattern }).first();
-          if (await frameButton.isVisible().catch(() => false)) {
-            const frameText = (await frameButton.textContent().catch(() => ''))
-              .trim()
-              .toLowerCase();
-            if (excludeLower.some((ex) => frameText.includes(ex))) {
-              console.log(`[CLICK] Skipping excluded button in frame: "${frameText}"`);
-              continue;
-            }
-            console.log(`[INFO] Found and clicking button in frame: ${frame.url()}`);
-            await frameButton.click();
-            return true;
-          }
-        } catch (fErr) {}
-      }
-
-      const allButtons = await this.page.evaluate(() =>
-        [...document.querySelectorAll('button, [role="button"], a[role="button"]')]
-          .map((b) => b.textContent?.trim())
-          .filter(Boolean)
-      );
-      console.error(`[ERROR] Button not found. Available buttons:`, allButtons);
-      console.error(`[ERROR] Looking for keywords:`, uniqueKeywords);
-      console.error(`[ERROR] Excluding:`, excludeLower);
-      throw err;
-    }
+    return await browserHelper.clickButtonWithPossibleNames(this.page, names, options, {
+      waitForSpinnerGone: () => this.waitForSpinnerGone(),
+      runWithMonitor: (p) => this.runWithMonitor(p),
+      hardTimeout: HARD_TIMEOUT,
+    });
   }
 
   getGenericLocator(keywords, elementType = 'input') {
-    const kws = Array.isArray(keywords) ? keywords : [keywords];
-    const selectors = kws
-      .map(
-        (keyword) =>
-          `${elementType}[id*="${keyword}" i], ${elementType}[data-testid*="${keyword}" i], ${elementType}[data-bi-id*="${keyword}" i], ${elementType}[name*="${keyword}" i], ${elementType}[aria-label*="${keyword}" i]`
-      )
-      .join(', ');
-
-    return this.page.locator(selectors).first();
+    return browserHelper.getGenericLocator(this.page, keywords, elementType);
   }
 
   getGenericButton(keywords) {
-    const textSelectors = keywords
-      .map((k) => `button:has-text("${k}"), a:has-text("${k}")`)
-      .join(', ');
-
-    const attrSelectors = keywords
-      .map(
-        (k) => `
-      button[id*="${k}" i],
-      button[data-testid*="${k}" i],
-      button[data-bi-id*="${k}" i],
-      a[data-bi-id*="${k}" i]
-    `
-      )
-      .join(', ');
-
-    return this.page.locator(`${textSelectors}, ${attrSelectors}`).first();
+    return browserHelper.getGenericButton(this.page, keywords);
   }
 
   async selectDropdownByText(selector, text) {
-    await this.waitForSpinnerGone();
-
-    const dropdown = this.page.locator(selector).first();
-    await this.runWithMonitor(dropdown.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
-
-    await dropdown.scrollIntoViewIfNeeded();
-
-    const tagName = await dropdown.evaluate((el) => el.tagName.toLowerCase());
-
-    if (tagName === 'select') {
-      const searchList = Array.isArray(text) ? text : [text];
-      for (const t of searchList) {
-        try {
-          await dropdown.selectOption({ label: t });
-          console.log(`[DROPDOWN] Selected via native: "${t}"`);
-          return true;
-        } catch {
-          continue;
-        }
-      }
-    }
-
-    await dropdown.click();
-
-    const dropdownItems = this.page.locator('.ms-Dropdown-items');
-    await this.runWithMonitor(dropdownItems.waitFor({ state: 'visible', timeout: HARD_TIMEOUT }));
-
-    const searchList = Array.isArray(text)
-      ? text.map((t) => (t || '').toString().trim())
-      : [(text || '').toString().trim()];
-
-    // Build selector string once — DO NOT resolve the locator to an element yet
-    let optionSelector = null;
-    for (const search of searchList) {
-      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const candidate = this.page
-        .locator('.ms-Dropdown-item', { hasText: new RegExp(escaped, 'i') })
-        .first();
-      if (await candidate.count()) {
-        optionSelector = { hasText: new RegExp(escaped, 'i') };
-        break;
-      }
-    }
-
-    if (!optionSelector) {
-      console.warn(`[DROPDOWN] Option not found for: ${text}`);
-      await this.page.keyboard.press('Escape');
-      return false;
-    }
-
-    // Retry loop: re-resolve fresh locator each attempt to avoid stale DOM refs
-    const MAX_RETRIES = 3;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        // Fresh locator on every attempt — this is the core fix
-        const freshOption = this.page.locator('.ms-Dropdown-item', optionSelector).first();
-
-        await freshOption.waitFor({ state: 'attached', timeout: HARD_TIMEOUT });
-        await freshOption.scrollIntoViewIfNeeded();
-
-        const displayText = await freshOption.textContent().catch(() => text);
-        console.log(`[DROPDOWN] Clicking: "${displayText?.trim()}" (attempt ${attempt + 1})`);
-
-        try {
-          // JS click langsung — tanpa hover/mouse move agar lebih cepat
-          await freshOption.evaluate((el) => el.click());
-        } catch {
-          console.log('[DROPDOWN] JS click failed, using humanClick fallback...');
-          await this.humanClick(freshOption, { timeout: HARD_TIMEOUT });
-        }
-
-        await this.page
-          .waitForSelector('.ms-Dropdown-items', {
-            state: 'detached',
-            timeout: HARD_TIMEOUT,
-          })
-          .catch(() => {});
-
-        return true;
-      } catch (err) {
-        if (attempt === MAX_RETRIES - 1) throw err;
-        console.warn(`[DROPDOWN] Attempt ${attempt + 1} failed (${err.message}), retrying...`);
-        await this.page.waitForTimeout(150);
-      }
-    }
-
-    return false;
+    return await browserHelper.selectDropdownByText(this.page, selector, text, {
+      waitForSpinnerGone: () => this.waitForSpinnerGone(),
+      runWithMonitor: (p) => this.runWithMonitor(p),
+      hardTimeout: HARD_TIMEOUT,
+    });
   }
 
   async waitForPage(selector) {
-    await this.waitForSpinnerGone();
-    if (selector) {
-      await this.runWithMonitor(
-        this.page.waitForSelector(selector, {
-          state: 'attached',
-          timeout: HARD_TIMEOUT,
-        })
-      );
-    } else {
-      await this.runWithMonitor(
-        this.page.waitForLoadState('domcontentloaded', {
-          timeout: HARD_TIMEOUT,
-        })
-      );
-    }
-    // Added random delay after every major page load to simulate human orientation time
-    await this.humanDelay(2500);
+    await browserHelper.waitForPage(this.page, selector, {
+      waitForSpinnerGone: () => this.waitForSpinnerGone(),
+      runWithMonitor: (p) => this.runWithMonitor(p),
+      humanDelay: (ms) => this.humanDelay(ms),
+      hardTimeout: HARD_TIMEOUT,
+    });
   }
 
   // ─── Steps ───────────────────────────────────────────────────────────────────
@@ -1110,54 +835,7 @@ class MicrosoftBot {
   }
 
   async handleCookiePopup() {
-    const MAX_WAIT_MS = 3000; // Dikurangi agar tidak kelamaan kalau memang tidak ada
-    const CHECK_INTERVAL = 500;
-    const elapsed = { val: 0 };
-
-    console.log('[COOKIE] Checking for cookie popup...');
-
-    // Poll sampai popup muncul atau timeout
-    let dialogVisible = false;
-    while (elapsed.val < MAX_WAIT_MS) {
-      const dialog = this.page
-        .locator(
-          'div[role="dialog"][aria-label*="cookie" i], div[role="dialog"][aria-modal="true"]'
-        )
-        .first();
-      dialogVisible = await dialog.isVisible().catch(() => false);
-      if (dialogVisible) break;
-      await this.page.waitForTimeout(CHECK_INTERVAL);
-      elapsed.val += CHECK_INTERVAL;
-    }
-
-    if (!dialogVisible) {
-      console.log('[COOKIE] No cookie popup detected.');
-      return;
-    }
-
-    console.log('[COOKIE] Cookie popup detected, closing...');
-
-    const closeStrategies = [
-      () => this.page.locator('button[aria-label="Fermer"]').first(),
-      () => this.page.locator('button').filter({ hasText: '✕' }).first(),
-      () => this.page.locator('button').filter({ hasText: '×' }).first(),
-      () =>
-        this.page.locator('button[aria-label*="close" i], button[aria-label*="fermer" i]').first(),
-    ];
-
-    for (const getLocator of closeStrategies) {
-      const btn = getLocator();
-      if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await btn.click({ force: true });
-        console.log('[COOKIE] Cookie popup closed.');
-        await this.page.waitForTimeout(800);
-        return;
-      }
-    }
-
-    console.warn('[COOKIE] Close button not found, trying Escape...');
-    await this.page.keyboard.press('Escape');
-    await this.page.waitForTimeout(500);
+    await browserHelper.handleCookiePopup(this.page);
   }
 
   async fillBasicInfo() {
@@ -1888,226 +1566,208 @@ class MicrosoftBot {
     console.log('[INFO] Payment step finished');
   }
 
-async acceptTrialAndStart() {
-  await this._logStep(16, 'Menyetujui trial dan memulai...');
-
-  // =============================
-  // ✅ Helper: normalize text
-  // =============================
-  const normalize = (str = '') =>
-    str
-      .toLowerCase()
-      .replace(/[’`]/g, "'") // samakan semua petik
-      .normalize('NFD') // hilangkan aksen (é -> e)
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ') // rapikan spasi
-      .trim();
-
-  // =============================
-  // ✅ Keywords
-  // =============================
-  const trialKeywords = [
-    'start trial',
-    'mulai uji coba',
-    "commencer l'essai",
-    "essayer l'essai",
-    "demarrer l'essai",
-    'try now',
-    'coba sekarang',
-    'essayer maintenant',
-    'mulai percobaan',
-    'start free trial',
-    'place order',
-    'pesan sekarang',
-    'passer la commande',
-    'commander maintenant',
-    'order now',
-    'checkout',
-    'selesaikan pesanan',
-    'confirm',
-    'konfirmasi',
-    'confirmer',
-    'start',
-    'mulai',
-  ].map(normalize);
-
-  // =============================
-  // ✅ Handle checkbox (optional)
-  // =============================
-  try {
-    const checkboxSelectors = [
-      'input[type="checkbox"]',
-      '[role="checkbox"]',
-      '.ms-Checkbox-input',
-      '#agreement-checkbox',
-    ];
-
-    const checkbox = this.page.locator(checkboxSelectors.join(', ')).first();
-    const checkboxVisible = await checkbox.isVisible({ timeout: 3000 }).catch(() => false);
-
-    if (checkboxVisible) {
-      const isChecked = await checkbox
-        .evaluate(
-          (el) =>
-            el.checked ||
-            el.getAttribute('aria-checked') === 'true' ||
-            el.classList.contains('is-checked')
-        )
-        .catch(() => false);
-
-      if (!isChecked) {
-        console.log('[INFO] Checking agreement checkbox...');
-        await this.randomMouseMove();
-        await checkbox.click({ force: true }).catch(() => {});
-        await this.humanDelay(1000);
-      } else {
-        console.log('[INFO] Agreement checkbox already checked.');
-      }
-    } else {
-      console.log('[INFO] No agreement checkbox found, skipping.');
-    }
-  } catch (e) {
-    console.log('[INFO] Checkbox handling skipped/failed:', e.message);
-  }
-
-  // =============================
-  // ✅ Retry klik tombol
-  // =============================
-  const MAX_RETRY = 3;
-  let clicked = false;
-
-  for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-    console.log(`[INFO] Waiting for Start Trial button (attempt ${attempt}/${MAX_RETRY})...`);
-
-    await this.waitForSpinnerGone(1000, PAYMENT_TIMEOUT);
+  async acceptTrialAndStart() {
+    await this._logStep(16, 'Menyetujui trial dan memulai...');
 
     // =============================
-    // ✅ Tunggu tombol ready
+    // ✅ Keywords
     // =============================
-    const btnReady = await this.page
-      .waitForFunction(
-        (keywords) => {
-          const normalize = (str = '') =>
-            str
-              .toLowerCase()
-              .replace(/[’`]/g, "'")
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .replace(/\s+/g, ' ')
-              .trim();
-
-          const candidates = [
-            ...document.querySelectorAll(
-              'button, [role="button"], a[role="button"], input[type="submit"]'
-            ),
-          ];
-
-          const btn = candidates.find((b) => {
-            const raw =
-              b.textContent || b.value || b.getAttribute('aria-label') || '';
-
-            const text = normalize(raw);
-
-            return (
-              text.length > 0 &&
-              text.length < 60 &&
-              keywords.some((kw) => text.includes(kw))
-            );
-          });
-
-          if (!btn) return false;
-
-          const isEnabled =
-            !btn.disabled &&
-            btn.getAttribute('aria-disabled') !== 'true' &&
-            !btn.classList.contains('is-disabled') &&
-            !btn.classList.contains('ms-Button--disabled');
-
-          const style = window.getComputedStyle(btn);
-          const isVisible =
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            style.opacity !== '0';
-
-          return isEnabled && isVisible;
-        },
-        trialKeywords,
-        { timeout: PAYMENT_TIMEOUT }
-      )
-      .then(() => true)
-      .catch(() => false);
-
-    if (!btnReady) {
-      console.warn(`[WARN] Button not ready on attempt ${attempt}`);
-      await this.humanDelay(2000);
-      continue;
-    }
+    const trialKeywords = [
+      'start trial',
+      'mulai uji coba',
+      "commencer l'essai",
+      "essayer l'essai",
+      "demarrer l'essai",
+      'try now',
+      'coba sekarang',
+      'essayer maintenant',
+      'mulai percobaan',
+      'start free trial',
+      'place order',
+      'pesan sekarang',
+      'passer la commande',
+      'commander maintenant',
+      'order now',
+      'checkout',
+      'selesaikan pesanan',
+      'confirm',
+      'konfirmasi',
+      'confirmer',
+      'start',
+      'mulai',
+    ].map(browserHelper.normalizeText);
 
     // =============================
-    // ✅ Klik tombol via JS
+    // ✅ Handle checkbox (optional)
     // =============================
-    const jsClicked = await this.page.evaluate((keywords) => {
-      const normalize = (str = '') =>
-        str
-          .toLowerCase()
-          .replace(/[’`]/g, "'")
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-      const candidates = [
-        ...document.querySelectorAll(
-          'button, [role="button"], a[role="button"], input[type="submit"]'
-        ),
+    try {
+      const checkboxSelectors = [
+        'input[type="checkbox"]',
+        '[role="checkbox"]',
+        '.ms-Checkbox-input',
+        '#agreement-checkbox',
       ];
 
-      const btn = candidates.find((b) => {
-        const raw =
-          b.textContent || b.value || b.getAttribute('aria-label') || '';
+      const checkbox = this.page.locator(checkboxSelectors.join(', ')).first();
+      const checkboxVisible = await checkbox.isVisible({ timeout: 3000 }).catch(() => false);
 
-        const text = normalize(raw);
+      if (checkboxVisible) {
+        const isChecked = await checkbox
+          .evaluate(
+            (el) =>
+              el.checked ||
+              el.getAttribute('aria-checked') === 'true' ||
+              el.classList.contains('is-checked')
+          )
+          .catch(() => false);
 
-        return (
-          text.length > 0 &&
-          text.length < 60 &&
-          keywords.some((kw) => text.includes(kw)) &&
-          !b.disabled &&
-          b.getAttribute('aria-disabled') !== 'true'
-        );
-      });
-
-      if (btn) {
-        btn.click();
-        return btn.textContent?.trim() || 'clicked';
+        if (!isChecked) {
+          console.log('[INFO] Checking agreement checkbox...');
+          await this.randomMouseMove();
+          await checkbox.click({ force: true }).catch(() => {});
+          await this.humanDelay(1000);
+        } else {
+          console.log('[INFO] Agreement checkbox already checked.');
+        }
+      } else {
+        console.log('[INFO] No agreement checkbox found, skipping.');
       }
-
-      return null;
-    }, trialKeywords);
-
-    if (jsClicked) {
-      console.log(`[INFO] Button clicked: "${jsClicked}"`);
-      clicked = true;
-      break;
+    } catch (e) {
+      console.log('[INFO] Checkbox handling skipped/failed:', e.message);
     }
 
-    console.warn(`[WARN] JS click failed attempt ${attempt}`);
-    await this.humanDelay(2000);
+    // =============================
+    // ✅ Retry klik tombol
+    // =============================
+    const MAX_RETRY = 3;
+    let clicked = false;
+
+    for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+      console.log(`[INFO] Waiting for Start Trial button (attempt ${attempt}/${MAX_RETRY})...`);
+
+      await this.waitForSpinnerGone(1000, PAYMENT_TIMEOUT);
+
+      // =============================
+      // ✅ Tunggu tombol ready
+      // =============================
+      const btnReady = await this.page
+        .waitForFunction(
+          (keywords) => {
+            const normalize = (str = '') =>
+              str
+                .toLowerCase()
+                .replace(/[’`]/g, "'")
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const candidates = [
+              ...document.querySelectorAll(
+                'button, [role="button"], a[role="button"], input[type="submit"]'
+              ),
+            ];
+
+            const btn = candidates.find((b) => {
+              const raw = b.textContent || b.value || b.getAttribute('aria-label') || '';
+
+              const text = normalize(raw);
+
+              return (
+                text.length > 0 && text.length < 60 && keywords.some((kw) => text.includes(kw))
+              );
+            });
+
+            if (!btn) return false;
+
+            const isEnabled =
+              !btn.disabled &&
+              btn.getAttribute('aria-disabled') !== 'true' &&
+              !btn.classList.contains('is-disabled') &&
+              !btn.classList.contains('ms-Button--disabled');
+
+            const style = window.getComputedStyle(btn);
+            const isVisible =
+              style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+
+            return isEnabled && isVisible;
+          },
+          trialKeywords,
+          { timeout: PAYMENT_TIMEOUT }
+        )
+        .then(() => true)
+        .catch(() => false);
+
+      if (!btnReady) {
+        console.warn(`[WARN] Button not ready on attempt ${attempt}`);
+        await this.humanDelay(2000);
+        continue;
+      }
+
+      // =============================
+      // ✅ Klik tombol via JS
+      // =============================
+      const jsClicked = await this.page.evaluate((keywords) => {
+        const normalize = (str = '') =>
+          str
+            .toLowerCase()
+            .replace(/[’`]/g, "'")
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const candidates = [
+          ...document.querySelectorAll(
+            'button, [role="button"], a[role="button"], input[type="submit"]'
+          ),
+        ];
+
+        const btn = candidates.find((b) => {
+          const raw = b.textContent || b.value || b.getAttribute('aria-label') || '';
+
+          const text = normalize(raw);
+
+          return (
+            text.length > 0 &&
+            text.length < 60 &&
+            keywords.some((kw) => text.includes(kw)) &&
+            !b.disabled &&
+            b.getAttribute('aria-disabled') !== 'true'
+          );
+        });
+
+        if (btn) {
+          btn.click();
+          return btn.textContent?.trim() || 'clicked';
+        }
+
+        return null;
+      }, trialKeywords);
+
+      if (jsClicked) {
+        console.log(`[INFO] Button clicked: "${jsClicked}"`);
+        clicked = true;
+        break;
+      }
+
+      console.warn(`[WARN] JS click failed attempt ${attempt}`);
+      await this.humanDelay(2000);
+    }
+
+    if (!clicked) {
+      console.warn('[WARN] All retry attempts failed, proceeding anyway...');
+    }
+
+    console.log('[INFO] Waiting for navigation...');
+
+    await this.runWithMonitor(
+      Promise.race([
+        this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
+        this.page.waitForLoadState('networkidle').catch(() => {}),
+      ])
+    );
   }
-
-  if (!clicked) {
-    console.warn('[WARN] All retry attempts failed, proceeding anyway...');
-  }
-
-  console.log('[INFO] Waiting for navigation...');
-
-  await this.runWithMonitor(
-    Promise.race([
-      this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
-      this.page.waitForLoadState('networkidle').catch(() => {}),
-    ])
-  );
-}
   async clickGetStartedButton() {
     await this._logStep(17, 'Klik tombol Get Started terakhir...');
 
