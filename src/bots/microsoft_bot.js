@@ -2,9 +2,16 @@ const { chromium } = require('playwright-core');
 const fs = require('fs');
 const config = require('../config');
 const remoteLogger = require('../utils/logger');
+const i18n = require('../utils/i18n');
 
-const SPINNER_SELECTOR =
-  '[data-testid="spinner"], .ms-Spinner, [class*="spinner" i], :has-text("Loading subtotal"), :has-text("Tunggu sebentar"), :has-text("Mohon tunggu"), :has-text("Veuillez patienter"), :has-text("Chargement du sous-total")';
+// Dynamically build SPINNER_SELECTOR using all configured variations
+const spinnerTexts = i18n.getAllVariations('selectors.spinner_text');
+const SPINNER_SELECTOR = [
+  '[data-testid="spinner"]',
+  '.ms-Spinner',
+  '[class*="spinner" i]',
+  ...spinnerTexts.map((text) => `:has-text("${text}")`),
+].join(', ');
 
 // Safety net — sangat besar, hanya untuk mencegah hang selamanya
 const HARD_TIMEOUT = config.hardTimeout;
@@ -17,6 +24,10 @@ class MicrosoftBot {
     this.context = null;
     this.page = null;
     this.accountConfig = accountConfig;
+    // Set language for this instance
+    if (accountConfig.language) {
+      i18n.setLanguage(accountConfig.language);
+    }
     this.originalEmail = accountConfig.microsoftAccount.email || 'New Account';
     this.onPaymentSaved = onPaymentSaved;
     this._paymentSavedTriggered = false;
@@ -600,7 +611,10 @@ class MicrosoftBot {
       if (cardToUse) {
         const tryFreeBtn = cardToUse
           .locator(
-            'a:has-text("Try for free"), a:has-text("Coba gratis"), a:has-text("Essayez gratuitement")'
+            i18n
+              .getAllVariations('buttons.try_for_free')
+              .map((text) => `a:has-text("${text}")`)
+              .join(', ')
           )
           .first();
 
@@ -647,7 +661,10 @@ class MicrosoftBot {
     console.log("[INFO] Scanning for global 'Try for free' button...");
     const globalBtn = this.page
       .locator(
-        'a:has-text("Try for free"), a:has-text("Coba gratis"), button:has-text("Try for free"), a:has-text("Essayez gratuitement"), a:has-text("Essai gratuit"), button:has-text("Essai gratuit")'
+        i18n
+          .getAllVariations('buttons.try_for_free')
+          .flatMap((text) => [`a:has-text("${text}")`, `button:has-text("${text}")`])
+          .join(', ')
       )
       .first();
     const [popupGlobal] = await Promise.all([
@@ -679,28 +696,15 @@ class MicrosoftBot {
     try {
       const oneMonthSelectors = [
         // Menargetkan wrapper yang berisi teks "1 month" (Sangat Aman untuk Fluent UI)
-        '.ms-ChoiceField-wrapper:has-text("1 month")',
-        '.ms-ChoiceField-wrapper:has-text("1 bulan")',
-
-        // Berdasarkan aria-label pada input (Sesuai snippet Anda)
-        'input[aria-label*="1 month" i]',
-        'input[aria-label*="1 bulan" i]',
-
-        // Selector fallback yang sudah ada
-        'label:has-text("1 month")',
-        'label:has-text("1 bulan")',
-        'label:has-text("1 mes")',
-        'label:has-text("1 mois")',
-        'label:has-text("1 Monat")',
-        'label:has-text("1 mese")',
-        'label:has-text("1 mês")',
-        'span:has-text("1 month")',
-        'span:has-text("1 bulan")',
-        'span:has-text("1 mes")',
-        'span:has-text("1 mois")',
-        'span:has-text("1 Monat")',
-        '[aria-label*="1 month" i]',
-        '[aria-label*="1 bulan" i]',
+        ...i18n
+          .getAllVariations('selectors.one_month')
+          .map((text) => `.ms-ChoiceField-wrapper:has-text("${text}")`),
+        ...i18n
+          .getAllVariations('selectors.one_month')
+          .map((text) => `input[aria-label*="${text}" i]`),
+        ...i18n.getAllVariations('selectors.one_month').map((text) => `label:has-text("${text}")`),
+        ...i18n.getAllVariations('selectors.one_month').map((text) => `span:has-text("${text}")`),
+        ...i18n.getAllVariations('selectors.one_month').map((text) => `[aria-label*="${text}" i]`),
         'input[value*="month" i]',
       ].join(', ');
 
@@ -721,14 +725,7 @@ class MicrosoftBot {
       console.log('[STEP 4] 1 month selection logic skipped:', e.message);
     }
 
-    await this.clickButtonWithPossibleNames([
-      'Next',
-      'Selanjutnya',
-      'Continue',
-      'Berikutnya',
-      'Suivant',
-      'Continuer',
-    ]);
+    await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
 
   async fillEmail() {
@@ -752,14 +749,7 @@ class MicrosoftBot {
 
   async submitEmailAndWaitForSetup() {
     await this._logStep(6, 'Submit email & menunggu transisi...');
-    await this.clickButtonWithPossibleNames([
-      'Next',
-      'Selanjutnya',
-      'Berikutnya',
-      'Suivant',
-      'Suivante',
-      'Nächste',
-    ]);
+    await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
 
     // Tunggu spinner selesai (monitor captcha/error otomatis di sini)
     console.log('[INFO] Waiting for page to settle after email submit...');
@@ -770,7 +760,10 @@ class MicrosoftBot {
       .locator('button[data-bi-id="VerifyCode"]')
       .or(
         this.page.locator(
-          'label:has-text("Verification code"), label:has-text("Kode verifikasi"), label:has-text("Code de vérification"), label:has-text("Entrez le code")'
+          i18n
+            .getAllVariations('selectors.verification_code')
+            .map((text) => `label:has-text("${text}")`)
+            .join(', ')
         )
       )
       .first();
@@ -797,31 +790,8 @@ class MicrosoftBot {
     }
 
     // Tunggu tombol Setup muncul sebagai konfirmasi transisi halaman
-    const setupBtn = this.getGenericButton([
-      'Set up account',
-      'Setup Account',
-      'Setup',
-      'Set up',
-      'Siapkan akun',
-      'Atur Akun',
-      'Siapkan Akun',
-      'Atur',
-      'Siapkan',
-      'Create new account',
-      'Create account',
-      'Buat akun baru',
-      'Buat akun',
-      'Crear cuenta nueva',
-      'Crear cuenta',
-      'Créer un compte',
-      'Configuration',
-      'Configurer le compte',
-      'Neues Konto erstellen',
-      'Crea nuovo account',
-      'Criar nova conta',
-      'Mulai',
-    ]);
-    console.log('[INFO] Waiting for Setup Account button to appear...');
+    const setupBtn = this.getGenericButton(i18n.getAllVariations('buttons.setup_account'));
+    console.log('[INFO] Menunggu tombol Setup Account muncul...');
     await setupBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {
       console.warn('[INFO] Setup Account button not visible yet, proceeding to Step 7 anyway.');
     });
@@ -834,7 +804,7 @@ class MicrosoftBot {
     const currentEmail = this.accountConfig.microsoftAccount.email || 'New Account';
     await this._logStep(
       this._currentStepIndex || 2,
-      `📧 <code>${currentEmail}</code>: Membuka Mailporary untuk email baru...`
+      `📧 ${currentEmail}: Membuka Mailporary untuk email baru...`
     );
     console.log(`[MAILPORARY] Opening Mailporary (forceNew: ${forceNew})...`);
 
@@ -909,7 +879,7 @@ class MicrosoftBot {
    */
   async readOtpFromMailporary() {
     const logEmail = this.accountConfig.microsoftAccount.email || 'Account';
-    await this._logStep(7, `🔍 <code>${logEmail}</code>: Menunggu kode OTP di Mailporary...`);
+    await this._logStep(7, `🔍 ${logEmail}: Menunggu kode OTP di Mailporary...`);
     console.log('[OTP] Waiting for verification code from Mailporary...');
 
     const mailporaryPage = await this.page.context().newPage();
@@ -994,7 +964,10 @@ class MicrosoftBot {
 
       const verifyBtn = this.page
         .locator(
-          'button[data-bi-id="VerifyCode"], button:has-text("Verify"), button:has-text("Vérifier"), button:has-text("Verifikasi")'
+          `button[data-bi-id="VerifyCode"], ${i18n
+            .getAllVariations('buttons.verify')
+            .map((text) => `button:has-text("${text}")`)
+            .join(', ')}`
         )
         .first();
       await verifyBtn.click();
@@ -1007,7 +980,7 @@ class MicrosoftBot {
       // Cek apakah ada pesan error eksplisit (kode salah)
       const errorMsg = this.page
         .locator(
-          '[data-automation-id="error-message"], [role="alert"], .ms-MessageBar--error, text=/code incorrect|incorrect code|code invalide|salah/i'
+          `[data-automation-id="error-message"], [role="alert"], .ms-MessageBar--error, text=/${i18n.getAllVariations('selectors.error_code_incorrect').join('|')}/i`
         )
         .first();
       if (await errorMsg.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -1045,30 +1018,7 @@ class MicrosoftBot {
     // Close cookie popup if visible (France specific cookies dialog)
     await this.handleCookiePopup();
     const clicked = await this.clickButtonWithPossibleNames(
-      [
-        'Set up account',
-        'Setup Account',
-        'Setup',
-        'Set up',
-        'Siapkan akun',
-        'Atur Akun',
-        'Siapkan Akun',
-        'Atur',
-        'Siapkan',
-        'Create new account',
-        'Create account',
-        'Buat akun baru',
-        'Buat akun',
-        'Crear cuenta nueva',
-        'Crear cuenta',
-        'Créer un compte',
-        'Configuration',
-        'Configurer le compte',
-        'Neues Konto erstellen',
-        'Crea nuovo account',
-        'Criar nova conta',
-        'Mulai',
-      ],
+      i18n.getAllVariations('buttons.setup_account'),
       {
         // Exclude tombol yang ada hubungannya dengan cookie
         excludeText: ['cookie', 'gérer', 'cookies', 'préférences', 'confidentialité'],
@@ -1084,15 +1034,16 @@ class MicrosoftBot {
       .locator('button[data-bi-id="VerifyCode"]')
       .or(
         this.page.locator(
-          'label:has-text("Verification code"), label:has-text("Kode verifikasi"), label:has-text("Code de vérification"), label:has-text("Entrez le code")'
+          i18n
+            .getAllVariations('selectors.verification_code')
+            .map((text) => `label:has-text("${text}")`)
+            .join(', ')
         )
       )
       .first();
 
     const rateLimitTrigger = this.page
-      .locator(
-        'text=/too many requests|reached the limit|jumlah permintaan terlalu tinggi|requêtes trop élevé/i'
-      )
+      .locator(`text=/${i18n.getAllVariations('selectors.rate_limit').join('|')}/i`)
       .first();
 
     const spinner = this.page.locator(SPINNER_SELECTOR).first();
@@ -1299,14 +1250,7 @@ class MicrosoftBot {
     console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
     await this.humanDelay(800, 1500);
 
-    await this.clickButtonWithPossibleNames([
-      'Next',
-      'Selanjutnya',
-      'Berikutnya',
-      'Continue',
-      'Suivant',
-      'Continuer',
-    ]);
+    await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
 
   // Mengisi address fields SESUAI urutan kemunculan di DOM
@@ -1450,16 +1394,10 @@ class MicrosoftBot {
 
     const combinedLocator = this.page
       .locator(
-        [
-          'button:has-text("Use this address")',
-          'button:has-text("Use address")',
-          'button:has-text("Gunakan alamat ini")',
-          'button:has-text("Utiliser cette adresse")',
-          'button[aria-label*="Use this address" i]',
-          'button[aria-label*="Use address" i]',
-          'button[aria-label*="Gunakan alamat ini" i]',
-          'button[aria-label*="Utiliser cette adresse" i]',
-        ].join(', ')
+        i18n
+          .getAllVariations('buttons.use_this_address')
+          .flatMap((text) => [`button:has-text("${text}")`, `button[aria-label*="${text}" i]`])
+          .join(', ')
       )
       .first();
 
@@ -1557,13 +1495,8 @@ class MicrosoftBot {
     await this.humanDelay(1000, 1800);
 
     await this.clickButtonWithPossibleNames([
-      'Next',
-      'Selanjutnya',
-      'Berikutnya',
-      'Suivant',
-      'Finish',
-      'Terminer',
-      'Selesai',
+      ...i18n.getAllVariations('buttons.next'),
+      ...i18n.getAllVariations('buttons.finish'),
     ]);
   }
 
@@ -1582,17 +1515,11 @@ class MicrosoftBot {
 
       const signInBtn = this.page
         .locator(
-          [
-            'button:has-text("Sign In")',
-            'button:has-text("Sign-In")',
-            'button:has-text("Masuk")',
-            'button:has-text("Se connecter")',
-            'a:has-text("Sign In")',
-            'a:has-text("Masuk")',
-            'a:has-text("Se connecter")',
-            '[data-bi-id*="signin" i]',
-            'button[id*="signin" i]',
-          ].join(', ')
+          i18n
+            .getAllVariations('buttons.sign_in')
+            .flatMap((text) => [`button:has-text("${text}")`, `a:has-text("${text}")`])
+            .concat(['[data-bi-id*="signin" i]', 'button[id*="signin" i]'])
+            .join(', ')
         )
         .first();
 
