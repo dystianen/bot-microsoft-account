@@ -1888,169 +1888,226 @@ class MicrosoftBot {
     console.log('[INFO] Payment step finished');
   }
 
-  async acceptTrialAndStart() {
-    await this._logStep(16, 'Menyetujui trial dan memulai...');
+async acceptTrialAndStart() {
+  await this._logStep(16, 'Menyetujui trial dan memulai...');
 
-    // Handle checkbox (Agreement) — opsional, skip jika tidak ada
-    try {
-      const checkboxSelectors = [
-        'input[type="checkbox"]',
-        '[role="checkbox"]',
-        '.ms-Checkbox-input',
-        '#agreement-checkbox',
-      ];
-      const checkbox = this.page.locator(checkboxSelectors.join(', ')).first();
-      const checkboxVisible = await checkbox.isVisible({ timeout: 3000 }).catch(() => false);
+  // =============================
+  // ✅ Helper: normalize text
+  // =============================
+  const normalize = (str = '') =>
+    str
+      .toLowerCase()
+      .replace(/[’`]/g, "'") // samakan semua petik
+      .normalize('NFD') // hilangkan aksen (é -> e)
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ') // rapikan spasi
+      .trim();
 
-      if (checkboxVisible) {
-        const isChecked = await checkbox
-          .evaluate(
-            (el) =>
-              el.checked ||
-              el.getAttribute('aria-checked') === 'true' ||
-              el.classList.contains('is-checked')
-          )
-          .catch(() => false);
+  // =============================
+  // ✅ Keywords
+  // =============================
+  const trialKeywords = [
+    'start trial',
+    'mulai uji coba',
+    "commencer l'essai",
+    "essayer l'essai",
+    "demarrer l'essai",
+    'try now',
+    'coba sekarang',
+    'essayer maintenant',
+    'mulai percobaan',
+    'start free trial',
+    'place order',
+    'pesan sekarang',
+    'passer la commande',
+    'commander maintenant',
+    'order now',
+    'checkout',
+    'selesaikan pesanan',
+    'confirm',
+    'konfirmasi',
+    'confirmer',
+    'start',
+    'mulai',
+  ].map(normalize);
 
-        if (!isChecked) {
-          console.log('[INFO] Checking agreement checkbox...');
-          await this.randomMouseMove();
-          await checkbox.click({ force: true }).catch(() => {});
-          await this.humanDelay(1000);
-        } else {
-          console.log('[INFO] Agreement checkbox already checked.');
-        }
-      } else {
-        console.log('[INFO] No agreement checkbox found, skipping.');
-      }
-    } catch (e) {
-      console.log('[INFO] Checkbox handling skipped/failed:', e.message);
-    }
-
-    // ✅ Retry loop: tunggu loading selesai, cari tombol, klik
-    // Jika loading 3DS belum selesai saat bot sampai sini, retry akan menanganinya
-    const trialKeywords = [
-      'start trial',
-      'mulai uji coba',
-      "commencer l'essai",
-      "essayer l'essai",
-      'try now',
-      'coba sekarang',
-      'essayer maintenant',
-      'mulai percobaan',
-      'start free trial',
-      'place order',
-      'pesan sekarang',
-      'passer la commande',
-      'commander maintenant',
-      'order now',
-      'checkout',
-      'selesaikan pesanan',
-      'confirm',
-      'konfirmasi',
-      'confirmer',
-      'start',
-      'mulai',
+  // =============================
+  // ✅ Handle checkbox (optional)
+  // =============================
+  try {
+    const checkboxSelectors = [
+      'input[type="checkbox"]',
+      '[role="checkbox"]',
+      '.ms-Checkbox-input',
+      '#agreement-checkbox',
     ];
 
-    const MAX_RETRY = 3;
-    let clicked = false;
+    const checkbox = this.page.locator(checkboxSelectors.join(', ')).first();
+    const checkboxVisible = await checkbox.isVisible({ timeout: 3000 }).catch(() => false);
 
-    for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-      console.log(`[INFO] Waiting for Start Trial button (attempt ${attempt}/${MAX_RETRY})...`);
-
-      // Tunggu spinner selesai di setiap attempt
-      await this.waitForSpinnerGone(1000, PAYMENT_TIMEOUT);
-
-      // Tunggu tombol enabled
-      const btnReady = await this.page
-        .waitForFunction(
-          (keywords) => {
-            const candidates = [
-              ...document.querySelectorAll(
-                'button, [role="button"], a[role="button"], input[type="submit"]'
-              ),
-            ];
-            const btn = candidates.find((b) => {
-              const text = (b.textContent || b.value || b.getAttribute('aria-label') || '')
-                .trim()
-                .toLowerCase();
-              return (
-                keywords.some((kw) => text.includes(kw)) && text.length > 0 && text.length < 60
-              );
-            });
-            if (!btn) return false;
-            const isEnabled =
-              !btn.disabled &&
-              btn.getAttribute('aria-disabled') !== 'true' &&
-              !btn.classList.contains('is-disabled') &&
-              !btn.classList.contains('ms-Button--disabled');
-            const style = window.getComputedStyle(btn);
-            const isVisible =
-              style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-            return isEnabled && isVisible;
-          },
-          trialKeywords,
-          { timeout: PAYMENT_TIMEOUT }
+    if (checkboxVisible) {
+      const isChecked = await checkbox
+        .evaluate(
+          (el) =>
+            el.checked ||
+            el.getAttribute('aria-checked') === 'true' ||
+            el.classList.contains('is-checked')
         )
-        .then(() => true)
         .catch(() => false);
 
-      if (!btnReady) {
-        console.warn(`[WARN] Start Trial button not ready on attempt ${attempt}.`);
-        await this.humanDelay(2000);
-        continue;
+      if (!isChecked) {
+        console.log('[INFO] Checking agreement checkbox...');
+        await this.randomMouseMove();
+        await checkbox.click({ force: true }).catch(() => {});
+        await this.humanDelay(1000);
+      } else {
+        console.log('[INFO] Agreement checkbox already checked.');
       }
-
-      // Klik via JS
-      const jsClicked = await this.page.evaluate((keywords) => {
-        const candidates = [
-          ...document.querySelectorAll(
-            'button, [role="button"], a[role="button"], input[type="submit"]'
-          ),
-        ];
-        const btn = candidates.find((b) => {
-          const text = (b.textContent || b.value || b.getAttribute('aria-label') || '')
-            .trim()
-            .toLowerCase();
-          return (
-            text.length > 0 &&
-            text.length < 60 &&
-            keywords.some((kw) => text.includes(kw)) &&
-            !b.disabled &&
-            b.getAttribute('aria-disabled') !== 'true'
-          );
-        });
-        if (btn) {
-          btn.click();
-          return btn.textContent?.trim() || 'clicked';
-        }
-        return null;
-      }, trialKeywords);
-
-      if (jsClicked) {
-        console.log(`[INFO] Start Trial JS clicked: "${jsClicked}" (attempt ${attempt})`);
-        clicked = true;
-        break;
-      }
-      console.warn(`[WARN] JS click failed on attempt ${attempt}.`);
-      await this.humanDelay(2000);
+    } else {
+      console.log('[INFO] No agreement checkbox found, skipping.');
     }
-
-    if (!clicked) {
-      console.warn('[WARN] All retry attempts failed for Start Trial, proceeding anyway...');
-    }
-
-    console.log('[INFO] Start Trial clicked, waiting for navigation...');
-
-    await this.runWithMonitor(
-      Promise.race([
-        this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
-        this.page.waitForLoadState('networkidle').catch(() => {}),
-      ])
-    );
+  } catch (e) {
+    console.log('[INFO] Checkbox handling skipped/failed:', e.message);
   }
 
+  // =============================
+  // ✅ Retry klik tombol
+  // =============================
+  const MAX_RETRY = 3;
+  let clicked = false;
+
+  for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+    console.log(`[INFO] Waiting for Start Trial button (attempt ${attempt}/${MAX_RETRY})...`);
+
+    await this.waitForSpinnerGone(1000, PAYMENT_TIMEOUT);
+
+    // =============================
+    // ✅ Tunggu tombol ready
+    // =============================
+    const btnReady = await this.page
+      .waitForFunction(
+        (keywords) => {
+          const normalize = (str = '') =>
+            str
+              .toLowerCase()
+              .replace(/[’`]/g, "'")
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+          const candidates = [
+            ...document.querySelectorAll(
+              'button, [role="button"], a[role="button"], input[type="submit"]'
+            ),
+          ];
+
+          const btn = candidates.find((b) => {
+            const raw =
+              b.textContent || b.value || b.getAttribute('aria-label') || '';
+
+            const text = normalize(raw);
+
+            return (
+              text.length > 0 &&
+              text.length < 60 &&
+              keywords.some((kw) => text.includes(kw))
+            );
+          });
+
+          if (!btn) return false;
+
+          const isEnabled =
+            !btn.disabled &&
+            btn.getAttribute('aria-disabled') !== 'true' &&
+            !btn.classList.contains('is-disabled') &&
+            !btn.classList.contains('ms-Button--disabled');
+
+          const style = window.getComputedStyle(btn);
+          const isVisible =
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.opacity !== '0';
+
+          return isEnabled && isVisible;
+        },
+        trialKeywords,
+        { timeout: PAYMENT_TIMEOUT }
+      )
+      .then(() => true)
+      .catch(() => false);
+
+    if (!btnReady) {
+      console.warn(`[WARN] Button not ready on attempt ${attempt}`);
+      await this.humanDelay(2000);
+      continue;
+    }
+
+    // =============================
+    // ✅ Klik tombol via JS
+    // =============================
+    const jsClicked = await this.page.evaluate((keywords) => {
+      const normalize = (str = '') =>
+        str
+          .toLowerCase()
+          .replace(/[’`]/g, "'")
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const candidates = [
+        ...document.querySelectorAll(
+          'button, [role="button"], a[role="button"], input[type="submit"]'
+        ),
+      ];
+
+      const btn = candidates.find((b) => {
+        const raw =
+          b.textContent || b.value || b.getAttribute('aria-label') || '';
+
+        const text = normalize(raw);
+
+        return (
+          text.length > 0 &&
+          text.length < 60 &&
+          keywords.some((kw) => text.includes(kw)) &&
+          !b.disabled &&
+          b.getAttribute('aria-disabled') !== 'true'
+        );
+      });
+
+      if (btn) {
+        btn.click();
+        return btn.textContent?.trim() || 'clicked';
+      }
+
+      return null;
+    }, trialKeywords);
+
+    if (jsClicked) {
+      console.log(`[INFO] Button clicked: "${jsClicked}"`);
+      clicked = true;
+      break;
+    }
+
+    console.warn(`[WARN] JS click failed attempt ${attempt}`);
+    await this.humanDelay(2000);
+  }
+
+  if (!clicked) {
+    console.warn('[WARN] All retry attempts failed, proceeding anyway...');
+  }
+
+  console.log('[INFO] Waiting for navigation...');
+
+  await this.runWithMonitor(
+    Promise.race([
+      this.page.waitForNavigation({ timeout: HARD_TIMEOUT }).catch(() => {}),
+      this.page.waitForLoadState('networkidle').catch(() => {}),
+    ])
+  );
+}
   async clickGetStartedButton() {
     await this._logStep(17, 'Klik tombol Get Started terakhir...');
 
