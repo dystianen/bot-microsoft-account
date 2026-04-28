@@ -1942,7 +1942,7 @@ class MicrosoftBot {
 
             // Special handling for 715-123280 to give user better context
             if (found === '715-123280' || snippet.includes('715-123280')) {
-              return `Something happened (715-123280): Microsoft memblokir sesi ini. Hal ini biasanya disebabkan oleh reputasi IP, penggunaan ulang data (Telepon/Perusahaan/Alamat), atau deteksi perilaku otomatis. Silakan coba menggunakan proxy baru atau data pendaftaran yang berbeda.`;
+              return `Something happened (715-123280): Sesi diblokir Microsoft, Coba ganti proxy atau data.`;
             }
 
             return snippet || found;
