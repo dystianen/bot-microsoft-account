@@ -589,10 +589,7 @@ class MicrosoftBot {
 
       this.accountConfig.microsoftAccount.email = finalEmail;
       this._emailFromMailporary = true; // Tandai bahwa email ini dari Mailporary
-      await this._logStep(
-        this._currentStepIndex || 6,
-        `📧 <code>${finalEmail}</code>: Email baru didapat: <code>${finalEmail}</code>`
-      );
+      await this._logStep(this._currentStepIndex || 6, `📧 Email baru didapat: ${finalEmail}`);
       return finalEmail;
     } finally {
       await mailporaryPage.close().catch(() => {});
@@ -731,7 +728,7 @@ class MicrosoftBot {
     // Refresh page Microsoft asli
     const refreshMsg = '[OTP] Refreshing Microsoft page for retry...';
     console.log(refreshMsg);
-    await this._logStep(this._currentStepIndex || 8, `🔄 <code>${logEmail}</code>: ${refreshMsg}`);
+    await this._logStep(this._currentStepIndex || 8, `🔄 ${logEmail}: ${refreshMsg}`);
     await this.page.reload({ waitUntil: 'domcontentloaded', timeout: HARD_TIMEOUT });
 
     // Note: clickProductNextButton is now handled by the main run() loop retry logic
