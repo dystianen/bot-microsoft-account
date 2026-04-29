@@ -1696,7 +1696,21 @@ class MicrosoftBot {
         .catch(() => false);
 
       if (!btnReady) {
-        console.warn(`[WARN] Button not ready on attempt ${attempt}`);
+        console.warn(
+          `[WARN] Button not ready on attempt ${attempt}. Checking for "Retry" button...`
+        );
+        const retryKeywords = i18n.getAllVariations('buttons.retry');
+        const retryClicked = await this.clickButtonWithPossibleNames(retryKeywords, {
+          timeout: 5000,
+        }).catch(() => false);
+
+        if (retryClicked) {
+          console.log('[INFO] "Retry" button clicked, waiting for page to reload...');
+          await this.humanDelay(3000);
+          attempt--; // Don't count this as a failed attempt to find the trial button
+          continue;
+        }
+
         await this.humanDelay(2000);
         continue;
       }
@@ -2077,6 +2091,11 @@ class MicrosoftBot {
 
           // Handle Captcha: Ambil email baru & reload
           if (msg.includes('CAPTCHA_DETECTED') || msg.includes('Protecting your account')) {
+            if (this._emailFromMailporary) {
+              const errorText = 'email dari maiporary terkena captcha';
+              console.error(`[ERROR] ${errorText}`);
+              throw new Error(`CAPTCHA_MAILPORARY: ${errorText}`);
+            }
             const warnMsg =
               '[CAPTCHA] Protecting your account detected. Switching to new Mailporary email...';
             console.warn(warnMsg);
@@ -2096,7 +2115,7 @@ class MicrosoftBot {
           if (
             msg.includes('RATE_LIMIT_ERROR') ||
             msg.includes('715-123280') ||
-            msg.includes('CAPTCHA')
+            (msg.includes('CAPTCHA') && !msg.includes('CAPTCHA_MAILPORARY'))
           ) {
             console.log(`[RETRY] Recoverable error detected: ${msg}. Retrying setup phase...`);
             await this.handleOtpWithMailporary();

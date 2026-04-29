@@ -59,6 +59,7 @@ module.exports = {
         'Ajouter un mode de paiement',
       ],
       save: ['Save', 'Simpan', 'Enregistrer', 'Sauvegarder'],
+      retry: ['Retry', 'Coba lagi', 'Ulangi', 'Réessayer', 'Try again'],
     },
     selectors: {
       spinner_text: [
@@ -107,6 +108,7 @@ module.exports = {
       sign_in: ['Sign In', 'Sign-In', 'Se connecter'],
       add_payment: ['Add payment method', 'Ajouter un mode de paiement'],
       save: ['Save', 'Enregistrer', 'Sauvegarder'],
+      retry: ['Retry', 'Try again', 'Réessayer'],
     },
     selectors: {
       spinner_text: [
@@ -139,6 +141,7 @@ module.exports = {
       sign_in: ['Se connecter', 'Connexion', 'Sign In'],
       add_payment: ['Ajouter un mode de paiement', 'Add payment method'],
       save: ['Enregistrer', 'Sauvegarder', 'Save'],
+      retry: ['Réessayer', 'Retry', 'Try again'],
     },
     selectors: {
       spinner_text: [
