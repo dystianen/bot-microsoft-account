@@ -83,6 +83,13 @@ module.exports = {
         'requêtes trop élevé',
       ],
       error_code_incorrect: ['code incorrect', 'incorrect code', 'code invalide', 'salah'],
+      manual_review: [
+        "We're checking to make sure we can offer you Microsoft products",
+        "review process usually takes up to 2 days",
+        "restricted until the review is complete",
+        'Kami sedang memeriksa untuk memastikan kami dapat menawarkan produk',
+        'Proses peninjauan biasanya memakan waktu hingga 2 hari',
+      ],
     },
   },
 
@@ -121,6 +128,11 @@ module.exports = {
       verification_code: ['Verification code', 'Code de vérification', 'Entrez le code'],
       rate_limit: ['too many requests', 'reached the limit', 'requêtes trop élevé'],
       error_code_incorrect: ['code incorrect', 'incorrect code', 'code invalide'],
+      manual_review: [
+        "We're checking to make sure we can offer you Microsoft products",
+        "review process usually takes up to 2 days",
+        "restricted until the review is complete",
+      ],
     },
   },
 
@@ -154,6 +166,11 @@ module.exports = {
       verification_code: ['Code de vérification', 'Entrez le code', 'Verification code'],
       rate_limit: ['requêtes trop élevé', 'too many requests', 'reached the limit'],
       error_code_incorrect: ['code incorrect', 'code invalide', 'incorrect code'],
+      manual_review: [
+        "We're checking to make sure we can offer you Microsoft products",
+        "review process usually takes up to 2 days",
+        "restricted until the review is complete",
+      ],
     },
   },
 };

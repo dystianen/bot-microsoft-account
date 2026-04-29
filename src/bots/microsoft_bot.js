@@ -1927,6 +1927,7 @@ class MicrosoftBot {
         "can't create your account",
         'cannot create your account',
         'identity could not be verified',
+        ...i18n.getAllVariations('selectors.manual_review'),
       ];
 
       for (const frame of this.page.frames()) {
@@ -1954,6 +1955,12 @@ class MicrosoftBot {
             // Special handling for 715-123280 to give user better context
             if (found === '715-123280' || snippet.includes('715-123280')) {
               return `Something happened (715-123280): Sesi diblokir Microsoft, Coba ganti proxy atau data.`;
+            }
+
+            // Special handling for Manual Review
+            const manualReviewMarkers = i18n.getAllVariations('selectors.manual_review');
+            if (manualReviewMarkers.some((m) => found.toLowerCase().includes(m.toLowerCase()))) {
+              return `MANUAL_REVIEW_DETECTED: Microsoft is reviewing your account. Usually takes 2 days.`;
             }
 
             return snippet || found;
