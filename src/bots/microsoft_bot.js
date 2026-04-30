@@ -454,8 +454,13 @@ class MicrosoftBot {
   }
 
   async fillEmail() {
-    const email = this.accountConfig.microsoftAccount.email;
-    await this._logStep(5, `Mengisi email: ${email}`);
+    // Bagian alur lama di-comment dulu sementara sesuai permintaan
+    // const email = this.accountConfig.microsoftAccount.email;
+    // await this._logStep(5, `Mengisi email: ${email}`);
+
+    // Buka dulu temp mail seperti yang sekarang berjalan
+    const email = await this.fetchNewEmailFromMailporary();
+    await this._logStep(6, `Mengisi email: ${email}`);
 
     const emailInput = this.getGenericLocator('email');
     await this.waitForVisible(emailInput);
@@ -2014,7 +2019,9 @@ class MicrosoftBot {
     try {
       await this.executeStep('Connecting to browser', 1, () => this.connect(), [1000, 3000]);
 
+      /* 
       // Ambil email dari Mailporary jika tidak ada di config atau diminta khusus
+      // Bagian ini di-comment dulu sementara, dipindah ke fillEmail
       if (!this.accountConfig.microsoftAccount.email || this.accountConfig.useMailporary) {
         await this.executeStep(
           'Fetching initial email from Mailporary',
@@ -2023,6 +2030,7 @@ class MicrosoftBot {
           [500, 1000]
         );
       }
+      */
 
       await this.executeStep(
         'Opening Microsoft page',

@@ -142,7 +142,7 @@ function initializeBotHandlers(bot) {
     sessions[chatId].step = 'WAIT_ACCOUNT';
     bot.sendMessage(
       chatId,
-      'Send Microsoft Account data in this format (one per line):\n\n`email|firstName|lastName|companyName|companySize|phone|jobTitle|address|city|state|postalCode|country|password`',
+      'Send Microsoft Account data in this format (one per line):\n\n`firstName|lastName|companyName|companySize|phone|jobTitle|address|city|state|postalCode|country|password`',
       { parse_mode: 'Markdown' }
     );
   });
@@ -675,21 +675,22 @@ function initializeBotHandlers(bot) {
       let added = 0;
       for (const line of lines) {
         const parts = line.split('|').map((s) => s.trim());
-        if (parts.length >= 13) {
+        if (parts.length >= 12) {
+          const tempId = `pending_${Math.random().toString(36).substring(7)}`;
           session.accounts.push({
-            email: parts[0],
-            firstName: parts[1],
-            lastName: parts[2],
-            companyName: parts[3],
-            companySize: parts[4],
-            phone: parts[5],
-            jobTitle: parts[6],
-            address: parts[7],
-            city: parts[8],
-            state: parts[9],
-            postalCode: parts[10],
-            country: parts[11],
-            password: parts[12],
+            email: tempId,
+            firstName: parts[0],
+            lastName: parts[1],
+            companyName: parts[2],
+            companySize: parts[3],
+            phone: parts[4],
+            jobTitle: parts[5],
+            address: parts[6],
+            city: parts[7],
+            state: parts[8],
+            postalCode: parts[9],
+            country: parts[10],
+            password: parts[11],
           });
           added++;
         }
