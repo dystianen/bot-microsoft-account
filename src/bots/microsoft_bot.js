@@ -282,12 +282,23 @@ class MicrosoftBot {
     });
   }
 
+  // Helper untuk exact plan match (word-boundary safe)
+  isPlanMatch(text, targetPlan) {
+    const normalized = text.trim().toUpperCase();
+    const target = targetPlan.trim().toUpperCase();
+    if (!normalized || !target) return false;
+    // Exact full match
+    if (normalized === target) return true;
+    // Word-boundary: E3 tidak match E30, E31, dst
+    const regex = new RegExp(`(^|[^A-Z0-9])${target}($|[^A-Z0-9])`, 'i');
+    return regex.test(normalized);
+  }
+
   async clickTryForFreeOnTargetCard() {
     const targetPlan = this.accountConfig.targetPlan || 'E3';
     await this._logStep(3, `Memilih paket trial: ${targetPlan}`);
 
     const cards = this.page.locator('div[ocr-component-name="card-plan-detail"]');
-    // Poll fast for cards without waiting for domcontentloaded
     const cardsVisible = await cards
       .first()
       .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
@@ -300,7 +311,7 @@ class MicrosoftBot {
       const count = await cards.count();
       let targetCard = null;
 
-      // 1. Prioritas cari card berdasarkan Judul (oc-product-title) agar lebih presisi
+      // 1. Prioritas: exact match via .oc-product-title
       for (let i = 0; i < count; i++) {
         const card = cards.nth(i);
         const title = await card
@@ -309,21 +320,29 @@ class MicrosoftBot {
           .textContent()
           .catch(() => '');
 
-        if (title.toUpperCase().includes(targetPlan.toUpperCase())) {
-          console.log(`[INFO] Exact plan title match found for ${targetPlan} at card index ${i}`);
+        if (isPlanMatch(title, targetPlan)) {
+          console.log(
+            `[INFO] Exact plan title match found for "${targetPlan}" at card index ${i} (title: "${title.trim()}")`
+          );
           targetCard = card;
           break;
         }
       }
 
-      // 2. Fallback: cari di seluruh text card jika judul tidak ketemu
+      // 2. Fallback: cari di heading/title element saja (bukan seluruh innerText)
       if (!targetCard) {
+        console.log(`[INFO] Title match not found, falling back to heading scan...`);
         for (let i = 0; i < count; i++) {
           const card = cards.nth(i);
-          const text = await card.innerText().catch(() => '');
-          if (text.toUpperCase().includes(targetPlan.toUpperCase())) {
+          const heading = await card
+            .locator('h1, h2, h3, h4, [class*="title"], [class*="name"], [class*="plan"]')
+            .first()
+            .textContent()
+            .catch(() => '');
+
+          if (isPlanMatch(heading, targetPlan)) {
             console.log(
-              `[INFO] Partial card text match found for ${targetPlan} at card index ${i}`
+              `[INFO] Heading match found for "${targetPlan}" at card index ${i} (heading: "${heading.trim()}")`
             );
             targetCard = card;
             break;
@@ -331,10 +350,30 @@ class MicrosoftBot {
         }
       }
 
-      const cardToUse = targetCard;
+      // 3. Last resort: seluruh innerText card, tapi tetap pakai isPlanMatch (bukan includes)
+      if (!targetCard) {
+        console.log(`[INFO] Heading match not found, falling back to full card text scan...`);
+        for (let i = 0; i < count; i++) {
+          const card = cards.nth(i);
+          const text = await card.innerText().catch(() => '');
 
-      if (cardToUse) {
-        const tryFreeBtn = cardToUse
+          // Scan per baris agar lebih presisi, hindari false positive dari deskripsi
+          const lines = text
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const matched = lines.some((line) => isPlanMatch(line, targetPlan));
+
+          if (matched) {
+            console.log(`[INFO] Full text line match found for "${targetPlan}" at card index ${i}`);
+            targetCard = card;
+            break;
+          }
+        }
+      }
+
+      if (targetCard) {
+        const tryFreeBtn = targetCard
           .locator(
             i18n
               .getAllVariations('buttons.try_for_free')
@@ -351,7 +390,6 @@ class MicrosoftBot {
               .context()
               .waitForEvent('page', { timeout: HARD_TIMEOUT })
               .catch(() => null),
-            // Gunakan JS Click untuk menghindari timeout pada Playwright Click
             tryFreeBtn
               .evaluate((el) => el.click())
               .catch(async () => {
@@ -365,24 +403,29 @@ class MicrosoftBot {
           if (popup) {
             this.page = popup;
             console.log('[INFO] Switched to new tab. Waiting for content settle...');
-            // Wait for full load and a bit extra for hydration
             await this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {});
             await this.waitForSpinnerGone();
-
-            // Wait specifically for any button to ensure JS is likely ready
             await this.page
               .locator('button, [role="button"], a.btn')
               .first()
               .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
               .catch(() => {});
-            await this.humanDelay(1500); // Small grace period for event listeners to attach
+            await this.humanDelay(1500);
             return;
           }
+        } else {
+          console.warn(
+            `[WARN] "Try for free" button not found inside matched card for plan "${targetPlan}"`
+          );
         }
+      } else {
+        console.warn(
+          `[WARN] No card matched for plan "${targetPlan}" — falling through to global scan`
+        );
       }
     }
 
-    // Fallback global search if cards not found or button not in card
+    // Fallback global search jika card tidak ditemukan atau button tidak ada di dalam card
     console.log("[INFO] Scanning for global 'Try for free' button...");
     const globalBtn = this.page
       .locator(
@@ -392,6 +435,7 @@ class MicrosoftBot {
           .join(', ')
       )
       .first();
+
     const [popupGlobal] = await Promise.all([
       this.page
         .context()
@@ -411,6 +455,10 @@ class MicrosoftBot {
         .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
         .catch(() => {});
       await this.humanDelay(1500);
+    } else {
+      console.error(
+        `[ERROR] No popup/tab opened after clicking "Try for free" for plan "${targetPlan}"`
+      );
     }
   }
 
@@ -1918,6 +1966,7 @@ class MicrosoftBot {
         "can't create your account",
         'cannot create your account',
         'identity could not be verified',
+        'Nous avons rencontré un problème',
         ...i18n.getAllVariations('selectors.manual_review'),
       ];
 
