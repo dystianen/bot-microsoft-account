@@ -320,7 +320,7 @@ class MicrosoftBot {
           .textContent()
           .catch(() => '');
 
-        if (isPlanMatch(title, targetPlan)) {
+        if (this.isPlanMatch(title, targetPlan)) {
           console.log(
             `[INFO] Exact plan title match found for "${targetPlan}" at card index ${i} (title: "${title.trim()}")`
           );
@@ -340,7 +340,7 @@ class MicrosoftBot {
             .textContent()
             .catch(() => '');
 
-          if (isPlanMatch(heading, targetPlan)) {
+          if (this.isPlanMatch(heading, targetPlan)) {
             console.log(
               `[INFO] Heading match found for "${targetPlan}" at card index ${i} (heading: "${heading.trim()}")`
             );
@@ -362,7 +362,7 @@ class MicrosoftBot {
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean);
-          const matched = lines.some((line) => isPlanMatch(line, targetPlan));
+          const matched = lines.some((line) => this.isPlanMatch(line, targetPlan));
 
           if (matched) {
             console.log(`[INFO] Full text line match found for "${targetPlan}" at card index ${i}`);
