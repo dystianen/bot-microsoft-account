@@ -1696,21 +1696,7 @@ class MicrosoftBot {
         .catch(() => false);
 
       if (!btnReady) {
-        console.warn(
-          `[WARN] Button not ready on attempt ${attempt}. Checking for "Retry" button...`
-        );
-        const retryKeywords = i18n.getAllVariations('buttons.retry');
-        const retryClicked = await this.clickButtonWithPossibleNames(retryKeywords, {
-          timeout: 5000,
-        }).catch(() => false);
-
-        if (retryClicked) {
-          console.log('[INFO] "Retry" button clicked, waiting for page to reload...');
-          await this.humanDelay(3000);
-          attempt--; // Don't count this as a failed attempt to find the trial button
-          continue;
-        }
-
+        console.warn(`[WARN] Button not ready on attempt ${attempt}`);
         await this.humanDelay(2000);
         continue;
       }
