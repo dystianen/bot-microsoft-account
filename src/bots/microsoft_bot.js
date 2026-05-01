@@ -277,7 +277,7 @@ class MicrosoftBot {
     const url = this.accountConfig.microsoftUrl || config.microsoftUrl;
     // Speed up initial navigation — wait for commit then poll for elements
     await this.page.goto(url, {
-      waitUntil: 'commit',
+      waitUntil: 'domcontentloaded',
       timeout: HARD_TIMEOUT,
     });
   }
@@ -287,10 +287,15 @@ class MicrosoftBot {
     const normalized = text.trim().toUpperCase();
     const target = targetPlan.trim().toUpperCase();
     if (!normalized || !target) return false;
+
     // Exact full match
     if (normalized === target) return true;
-    // Word-boundary: E3 tidak match E30, E31, dst
-    const regex = new RegExp(`(^|[^A-Z0-9])${target}($|[^A-Z0-9])`, 'i');
+
+    // Escape special regex characters in targetPlan
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Strict word-boundary: must not be preceded or followed by alphanumeric
+    const regex = new RegExp(`(?<![A-Z0-9])${escaped}(?![A-Z0-9])`, 'i');
     return regex.test(normalized);
   }
 
@@ -350,25 +355,51 @@ class MicrosoftBot {
         }
       }
 
-      // 3. Last resort: seluruh innerText card, tapi tetap pakai isPlanMatch (bukan includes)
+      // 3. Last resort: seluruh innerText card, scan per baris pendek saja
+      //    Baris panjang (> 30 char) dianggap deskripsi dan dilewati
+      //    untuk mencegah false positive seperti "Includes all E3 features..."
       if (!targetCard) {
         console.log(`[INFO] Heading match not found, falling back to full card text scan...`);
         for (let i = 0; i < count; i++) {
           const card = cards.nth(i);
           const text = await card.innerText().catch(() => '');
 
-          // Scan per baris agar lebih presisi, hindari false positive dari deskripsi
           const lines = text
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean);
-          const matched = lines.some((line) => this.isPlanMatch(line, targetPlan));
+
+          const matched = lines.some((line) => {
+            // Skip long lines — likely descriptions that may mention other plans
+            if (line.length > 30) return false;
+            return this.isPlanMatch(line, targetPlan);
+          });
 
           if (matched) {
             console.log(`[INFO] Full text line match found for "${targetPlan}" at card index ${i}`);
             targetCard = card;
             break;
           }
+        }
+      }
+
+      // Double-check: validate selected card title before clicking
+      if (targetCard) {
+        const confirmedTitle = await targetCard
+          .locator('.oc-product-title')
+          .first()
+          .textContent()
+          .catch(() => '');
+
+        if (confirmedTitle && !this.isPlanMatch(confirmedTitle, targetPlan)) {
+          console.warn(
+            `[WARN] Card title mismatch! Expected "${targetPlan}", got "${confirmedTitle.trim()}". Resetting target card.`
+          );
+          targetCard = null;
+        } else {
+          console.log(
+            `[INFO] Confirmed selected card: "${confirmedTitle.trim() || '(title not readable)'}"`
+          );
         }
       }
 
