@@ -923,38 +923,32 @@ class MicrosoftBot {
     await this._logStep(8, 'Mengisi informasi dasar akun...');
     await this.waitWithCheck(this.getGenericLocator(['first', 'prénom', 'prenom']), HARD_TIMEOUT);
 
-    // Country
+    // === COUNTRY ===
     await this.selectDropdownByText(
       'div[role="combobox"][id*="country" i], select[id*="country" i]',
       this.accountConfig.microsoftAccount.country || 'United States'
     ).catch(() => {});
     await this.page.waitForTimeout(200);
 
-    // === NAME ===
+    // === FIRST NAME ===
     const firstLocator = this.getGenericLocator(['first', 'prénom', 'prenom']);
     await this.waitForVisible(firstLocator);
     await this.humanPaste(firstLocator, this.accountConfig.microsoftAccount.firstName);
     await this.page.waitForTimeout(200);
 
-    if (this.accountConfig.microsoftAccount.middleName) {
-      const middleLocator = this.getGenericLocator(['middle', 'deuxième']);
-      if (await middleLocator.isVisible().catch(() => false)) {
-        await this.humanPaste(middleLocator, this.accountConfig.microsoftAccount.middleName);
-        await this.page.waitForTimeout(200);
-      }
-    }
-
+    // === LAST NAME ===
     const lastLocator = this.getGenericLocator(['last', 'nom', 'famille']);
     await this.waitForVisible(lastLocator);
     await this.humanPaste(lastLocator, this.accountConfig.microsoftAccount.lastName);
     await this.page.waitForTimeout(200);
 
-    // === COMPANY ===
+    // === COMPANY NAME ===
     const companyLocator = this.getGenericLocator(['company', 'entreprise', 'société']);
     await this.waitForVisible(companyLocator);
     await this.humanPaste(companyLocator, this.accountConfig.microsoftAccount.companyName);
     await this.page.waitForTimeout(200);
 
+    // === COMPANY SIZE ===
     await this.humanScroll();
     await this.selectDropdownByText(
       'div[role="combobox"][id*="size" i], div[role="combobox"][data-testid*="size" i], select[id*="size" i]',
@@ -968,6 +962,7 @@ class MicrosoftBot {
     await this.humanPaste(phoneLocator, this.accountConfig.microsoftAccount.phone);
     await this.page.waitForTimeout(200);
 
+    // === JOB TITLE ===
     const jobLocator = this.getGenericLocator(['job', 'poste', 'fonction']);
     await this.waitForVisible(jobLocator);
     await this.humanPaste(jobLocator, this.accountConfig.microsoftAccount.jobTitle);
