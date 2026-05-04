@@ -923,6 +923,13 @@ class MicrosoftBot {
     await this._logStep(8, 'Mengisi informasi dasar akun...');
     await this.waitWithCheck(this.getGenericLocator(['first', 'prénom', 'prenom']), HARD_TIMEOUT);
 
+    // Country
+    await this.selectDropdownByText(
+      'div[role="combobox"][id*="country" i], select[id*="country" i]',
+      this.accountConfig.microsoftAccount.country || 'United States'
+    ).catch(() => {});
+    await this.page.waitForTimeout(200);
+
     // === NAME ===
     const firstLocator = this.getGenericLocator(['first', 'prénom', 'prenom']);
     await this.waitForVisible(firstLocator);
