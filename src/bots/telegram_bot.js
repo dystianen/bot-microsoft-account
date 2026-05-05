@@ -268,18 +268,16 @@ function initializeBotHandlers(bot) {
           ],
           [
             { text: '🌐 Set Full Proxy', callback_data: 'set_proxy_full' },
-          ],
-          [
-            {
-              text: `🛑 Stop: ${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}`,
-              callback_data: 'set_stop_point',
-            },
             {
               text: `🎯 Plan: ${userConf.targetPlan || 'E3'}`,
               callback_data: 'set_target_plan',
             },
           ],
           [
+            {
+              text: `🛑 Stop: ${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}`,
+              callback_data: 'set_stop_point',
+            },
             {
               text: `👁️ Headless: ${userConf.headless ? 'Active' : 'Inactive'}`,
               callback_data: `toggle_headless`,
@@ -289,18 +287,18 @@ function initializeBotHandlers(bot) {
       },
     };
 
-      bot.sendMessage(
-        chatId,
-        `⚙️ <b>Current Configuration:</b>\n\n` +
-          `URL: <code>${userConf.microsoftUrl}</code>\n` +
-          `Concurrency: ${userConf.concurrencyLimit}\n` +
-          `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-          `Proxy: <code>${userConf.proxyHost || config.proxy.host}:${userConf.proxyPort || config.proxy.port}:${userConf.proxyUsername || config.proxy.username}:${userConf.proxyPassword || config.proxy.password}</code>\n` +
-          `Stop Point: <b>${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}</b>\n` +
-          `Target Plan: <b>${userConf.targetPlan || 'E3'}</b>\n` +
-          `<b>Headless Mode:</b> <code>${userConf.headless ? 'Active (No window)' : 'Inactive (Visible window)'}</code>\n`,
-        { parse_mode: 'HTML', ...options }
-      );
+    bot.sendMessage(
+      chatId,
+      `⚙️ <b>Current Configuration:</b>\n\n` +
+        `URL: <code>${userConf.microsoftUrl}</code>\n` +
+        `Concurrency: ${userConf.concurrencyLimit}\n` +
+        `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
+        `Proxy: <code>${userConf.proxyHost || config.proxy.host}:${userConf.proxyPort || config.proxy.port}:${userConf.proxyUsername || config.proxy.username}:${userConf.proxyPassword || config.proxy.password}</code>\n` +
+        `Stop Point: <b>${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}</b>\n` +
+        `Target Plan: <b>${userConf.targetPlan || 'E3'}</b>\n` +
+        `<b>Headless Mode:</b> <code>${userConf.headless ? 'Active (No window)' : 'Inactive (Visible window)'}</code>\n`,
+      { parse_mode: 'HTML', ...options }
+    );
   });
 
   bot.on('callback_query', async (callbackQuery) => {
@@ -326,9 +324,13 @@ function initializeBotHandlers(bot) {
       bot.sendMessage(chatId, 'Please send the maximum accounts allowed per VCC (number).');
     } else if (data === 'set_proxy_full') {
       sessions[chatId].step = 'SET_PROXY_FULL';
-      bot.sendMessage(chatId, 'Please send the full proxy string in format: `host:port:user:pass`', {
-        parse_mode: 'Markdown',
-      });
+      bot.sendMessage(
+        chatId,
+        'Please send the full proxy string in format: `host:port:user:pass`',
+        {
+          parse_mode: 'Markdown',
+        }
+      );
     } else if (data === 'set_proxy_user') {
       sessions[chatId].step = 'SET_PROXY_USER';
       bot.sendMessage(chatId, 'Please send the new Proxy Username.');
@@ -359,15 +361,24 @@ function initializeBotHandlers(bot) {
       const options = {
         reply_markup: {
           inline_keyboard: [
-            [{ text: 'E1', callback_data: 'plan_E1' }],
-            [{ text: 'E3', callback_data: 'plan_E3' }],
-            [{ text: 'E5', callback_data: 'plan_E5' }],
+            [
+              { text: 'E1', callback_data: 'plan_E1' },
+              { text: 'E3', callback_data: 'plan_E3' },
+            ],
+            [
+              { text: 'E5', callback_data: 'plan_E5' },
+              { text: 'Business Premium', callback_data: 'plan_Business Premium' },
+            ],
+            [
+              { text: 'Business Standard', callback_data: 'plan_Business Standard' },
+              { text: 'Business Basic', callback_data: 'plan_Business Basic' },
+            ],
           ],
         },
       };
       bot.sendMessage(chatId, 'Choose the target Office 365 Plan:', options);
     } else if (data.startsWith('plan_')) {
-      const plan = data.replace('plan_', '');
+      const plan = data.substring(5); // Remove 'plan_' prefix, keeping spaces
       const userConf = await getUserConfig(chatId);
       userConf.targetPlan = plan;
       await userConf.save();
