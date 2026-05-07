@@ -13,4 +13,4 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 # Jalankan bot menggunakan runtime Bun
-CMD ["bun", "run", "src/bots/telegram_bot.js"]
+CMD ["bun", "run", "bot"]
