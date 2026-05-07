@@ -10,8 +10,8 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# ✅ Ganti ke npx
-RUN npx playwright install chromium --with-deps
+# ✅ Setelah bun install, pakai playwright dari node_modules
+RUN ./node_modules/.bin/playwright install chromium --with-deps
 
 COPY . .
 
