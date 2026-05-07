@@ -208,30 +208,30 @@ class MicrosoftBot {
   async connect() {
     await this._logStep(1, '🌐 Menghubungkan ke browser...');
 
-    // this.browser = await Promise.race([
-    //   chromium.connectOverCDP(this.wsUrl),
-    //   new Promise((_, reject) =>
-    //     setTimeout(
-    //       () => reject(new Error(`CDP connection timeout after ${config.hardTimeout / 1000}s`)),
-    //       HARD_TIMEOUT
-    //     )
-    //   ),
-    // ]);
+    this.browser = await Promise.race([
+      chromium.connectOverCDP(this.wsUrl),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`CDP connection timeout after ${config.hardTimeout / 1000}s`)),
+          HARD_TIMEOUT
+        )
+      ),
+    ]);
 
-    this.browser = await chromium.launch({
-      headless:
-        this.accountConfig?.headless !== undefined ? this.accountConfig.headless : config.headless,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--incognito',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--mute-audio',
-        '--window-position=0,0',
-      ],
-    });
+    // this.browser = await chromium.launch({
+    //   headless:
+    //     this.accountConfig?.headless !== undefined ? this.accountConfig.headless : config.headless,
+    //   args: [
+    //     '--no-sandbox',
+    //     '--disable-setuid-sandbox',
+    //     '--incognito',
+    //     '--disable-blink-features=AutomationControlled',
+    //     '--disable-gpu',
+    //     '--disable-dev-shm-usage',
+    //     '--mute-audio',
+    //     '--window-position=0,0',
+    //   ],
+    // });
 
     const contexts = this.browser.contexts();
     this.context = contexts.length > 0 ? contexts[0] : await this.browser.newContext();
