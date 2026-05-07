@@ -43,8 +43,8 @@ class AdsPowerHelper {
     try {
       const proxy = {
         proxy_type: 'socks5',
-        proxy_host: config.proxy.host,
-        proxy_port: config.proxy.port,
+        proxy_host: proxyOverride?.host || config.proxy.host,
+        proxy_port: proxyOverride?.port || config.proxy.port,
         proxy_user: proxyOverride?.username || config.proxy.username,
         proxy_password: proxyOverride?.password || config.proxy.password,
         proxy_soft: 'other',

@@ -10,13 +10,27 @@ module.exports = {
     apiKey: process.env.ADSPOWER_API_KEY,
     groupId: process.env.ADSPOWER_GROUP_ID,
   },
-  proxy: {
-    host: process.env.PROXY_HOST,
-    port: process.env.PROXY_PORT,
-    username: process.env.PROXY_USERNAME,
-    password: process.env.PROXY_PASSWORD,
-    type: 'socks5',
-  },
+  proxy: (() => {
+    if (process.env.PROXY) {
+      const parts = process.env.PROXY.split(':');
+      if (parts.length === 4) {
+        return {
+          host: parts[0],
+          port: parts[1],
+          username: parts[2],
+          password: parts[3],
+          type: 'socks5',
+        };
+      }
+    }
+    return {
+      host: process.env.PROXY_HOST,
+      port: process.env.PROXY_PORT,
+      username: process.env.PROXY_USERNAME,
+      password: process.env.PROXY_PASSWORD,
+      type: 'socks5',
+    };
+  })(),
   maxAccountsPerPayment: 3,
   telegram: {
     token: process.env.TELEGRAM_BOT_TOKEN,

@@ -267,20 +267,17 @@ function initializeBotHandlers(bot) {
             },
           ],
           [
-            { text: '👤 Proxy User', callback_data: 'set_proxy_user' },
-            { text: '🔑 Proxy Pass', callback_data: 'set_proxy_pass' },
-          ],
-          [
-            {
-              text: `🛑 Stop: ${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}`,
-              callback_data: 'set_stop_point',
-            },
+            { text: '🌐 Set Full Proxy', callback_data: 'set_proxy_full' },
             {
               text: `🎯 Plan: ${userConf.targetPlan || 'E3'}`,
               callback_data: 'set_target_plan',
             },
           ],
           [
+            {
+              text: `🛑 Stop: ${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}`,
+              callback_data: 'set_stop_point',
+            },
             {
               text: `👁️ Headless: ${userConf.headless ? 'Active' : 'Inactive'}`,
               callback_data: `toggle_headless`,
@@ -296,7 +293,7 @@ function initializeBotHandlers(bot) {
         `URL: <code>${userConf.microsoftUrl}</code>\n` +
         `Concurrency: ${userConf.concurrencyLimit}\n` +
         `Max Accounts/VCC: ${userConf.maxAccountsPerPayment}\n` +
-        `Proxy User: <code>${userConf.proxyUsername}</code>\n` +
+        `Proxy: <code>${userConf.proxyHost || config.proxy.host}:${userConf.proxyPort || config.proxy.port}:${userConf.proxyUsername || config.proxy.username}:${userConf.proxyPassword || config.proxy.password}</code>\n` +
         `Stop Point: <b>${userConf.stopPoint === 'vcc_success' ? 'VCC Success' : 'Full Step'}</b>\n` +
         `Target Plan: <b>${userConf.targetPlan || 'E3'}</b>\n` +
         `<b>Headless Mode:</b> <code>${userConf.headless ? 'Active (No window)' : 'Inactive (Visible window)'}</code>\n`,
@@ -325,6 +322,15 @@ function initializeBotHandlers(bot) {
     } else if (data === 'set_max_vcc') {
       sessions[chatId].step = 'SET_MAX_VCC';
       bot.sendMessage(chatId, 'Please send the maximum accounts allowed per VCC (number).');
+    } else if (data === 'set_proxy_full') {
+      sessions[chatId].step = 'SET_PROXY_FULL';
+      bot.sendMessage(
+        chatId,
+        'Please send the full proxy string in format: `host:port:user:pass`',
+        {
+          parse_mode: 'Markdown',
+        }
+      );
     } else if (data === 'set_proxy_user') {
       sessions[chatId].step = 'SET_PROXY_USER';
       bot.sendMessage(chatId, 'Please send the new Proxy Username.');
@@ -355,15 +361,24 @@ function initializeBotHandlers(bot) {
       const options = {
         reply_markup: {
           inline_keyboard: [
-            [{ text: 'E1', callback_data: 'plan_E1' }],
-            [{ text: 'E3', callback_data: 'plan_E3' }],
-            [{ text: 'E5', callback_data: 'plan_E5' }],
+            [
+              { text: 'E1', callback_data: 'plan_E1' },
+              { text: 'E3', callback_data: 'plan_E3' },
+            ],
+            [
+              { text: 'E5', callback_data: 'plan_E5' },
+              { text: 'Business Premium', callback_data: 'plan_Business Premium' },
+            ],
+            [
+              { text: 'Business Standard', callback_data: 'plan_Business Standard' },
+              { text: 'Business Basic', callback_data: 'plan_Business Basic' },
+            ],
           ],
         },
       };
       bot.sendMessage(chatId, 'Choose the target Office 365 Plan:', options);
     } else if (data.startsWith('plan_')) {
-      const plan = data.replace('plan_', '');
+      const plan = data.substring(5); // Remove 'plan_' prefix, keeping spaces
       const userConf = await getUserConfig(chatId);
       userConf.targetPlan = plan;
       await userConf.save();
@@ -470,6 +485,8 @@ function initializeBotHandlers(bot) {
           },
           telegram_id: chatId,
           microsoftUrl: userConf.microsoftUrl,
+          proxyHost: userConf.proxyHost,
+          proxyPort: userConf.proxyPort,
           proxyUsername: userConf.proxyUsername,
           proxyPassword: userConf.proxyPassword,
           stopPoint: userConf.stopPoint,
@@ -783,6 +800,22 @@ function initializeBotHandlers(bot) {
         await userConf.save();
         bot.sendMessage(chatId, 'Max accounts per VCC updated.', mainMenu);
         session.step = 'IDLE';
+      }
+    } else if (session.step === 'SET_PROXY_FULL') {
+      const parts = text.trim().split(':');
+      if (parts.length === 4) {
+        const userConf = await getUserConfig(chatId);
+        userConf.proxyHost = parts[0];
+        userConf.proxyPort = parts[1];
+        userConf.proxyUsername = parts[2];
+        userConf.proxyPassword = parts[3];
+        await userConf.save();
+        bot.sendMessage(chatId, '✅ Proxy configuration updated successfully.', mainMenu);
+        session.step = 'IDLE';
+      } else {
+        bot.sendMessage(chatId, '❌ Invalid format. Please use: `host:port:user:pass`', {
+          parse_mode: 'Markdown',
+        });
       }
     } else if (session.step === 'SET_PROXY_USER') {
       const userConf = await getUserConfig(chatId);

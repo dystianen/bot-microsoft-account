@@ -33,8 +33,13 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
   try {
     console.log(`[Account ${index + 1}] Creating AdsPower profile...`);
     const proxyOverride =
-      accountConfig.proxyUsername && accountConfig.proxyPassword
+      accountConfig.proxyHost &&
+      accountConfig.proxyPort &&
+      accountConfig.proxyUsername &&
+      accountConfig.proxyPassword
         ? {
+            host: accountConfig.proxyHost,
+            port: accountConfig.proxyPort,
             username: accountConfig.proxyUsername,
             password: accountConfig.proxyPassword,
           }
