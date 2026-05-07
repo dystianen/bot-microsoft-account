@@ -1,6 +1,6 @@
 services:
   account-bot:
-    build: .
+    image: dystian/bot-microsoft-account-account-bot:latest
     shm_size: '2gb'
     container_name: microsoft-account-bot
     restart: always
