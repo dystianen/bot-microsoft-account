@@ -611,7 +611,7 @@ function initializeBotHandlers(bot) {
         const processedCount = queueResults.success.length + queueResults.failed.length;
         let summaryMsg = session.forceStop
           ? `🛑 <b>Batch Queue Stopped Manually</b>\n`
-          : `🏁 <b>Batch Queue Finished</b>\n`;
+          : `🏁 <b>Batch Queue Finished - SIGN UP</b>\n`;
 
         summaryMsg += `🔢 Total Queue: <code>${originalTotal}</code>\n`;
         summaryMsg += `✅ Success: <code>${queueResults.success.length}</code>\n`;
