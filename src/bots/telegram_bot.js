@@ -545,8 +545,10 @@ function initializeBotHandlers(bot) {
           if (result.status === 'SUCCESS') {
             queueResults.success.push({
               email: accountData.email,
+              password: accountData.password,
               domainEmail: result.domainEmail,
               domainPassword: result.domainPassword,
+              finishedAt: new Date(),
             });
             let message = `✅ <b>Success [${currentIdx}]</b>\n`;
             message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
@@ -557,7 +559,9 @@ function initializeBotHandlers(bot) {
           } else {
             queueResults.failed.push({
               email: accountData.email,
+              password: accountData.password,
               log: result.log,
+              finishedAt: new Date(),
             });
             let message = `❌ <b>Failed [${currentIdx}] for ${escapeHTML(accountData.email)}</b>\n`;
             message += `Time: <code>${date.format(new Date(), 'DD MMM YYYY HH:mm', true)}</code>\n`;
@@ -570,7 +574,9 @@ function initializeBotHandlers(bot) {
         } catch (err) {
           queueResults.failed.push({
             email: accountData.email,
+            password: accountData.password,
             log: err.message,
+            finishedAt: new Date(),
           });
           await safeSendMessage(chatId, `❌ Error: ${escapeHTML(err.message)}`);
         } finally {
@@ -641,18 +647,48 @@ function initializeBotHandlers(bot) {
 
         if (queueResults.success.length > 0) {
           summaryMsg += `🟢 <b>SUCCESS LIST:</b>\n`;
-          queueResults.success.forEach((r, i) => {
-            summaryMsg += `${i + 1}. 📧 <code>${escapeHTML(r.domainEmail)}</code>\n`;
-            summaryMsg += `   🔑 <code>${escapeHTML(r.domainPassword)}</code>\n`;
+          const successItems = [...queueResults.success].reverse();
+          successItems.forEach((r, i) => {
+            const timeStr = r.finishedAt.toLocaleString('en-GB', {
+              timeZone: 'Asia/Jakarta',
+              day: '2-digit',
+              month: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            });
+            const [datePart, timePart] = timeStr.split(', ');
+            const [d, m] = datePart.split('/');
+            const shortTime = `${d}/${m}, ${timePart}`;
+
+            summaryMsg += `${i + 1}. ${shortTime}\n`;
+            summaryMsg += `- <code>${escapeHTML(r.domainEmail)}</code>\n`;
+            summaryMsg += `- <code>${escapeHTML(r.domainPassword)}</code>\n`;
+            summaryMsg += `────────────────\n`;
           });
           summaryMsg += `\n`;
         }
 
         if (queueResults.failed.length > 0) {
           summaryMsg += `🔴 <b>FAILED LIST:</b>\n`;
-          queueResults.failed.forEach((r, i) => {
-            summaryMsg += `${i + 1}. <code>${escapeHTML(r.email)}</code>\n`;
-            summaryMsg += `   ⚠️ Log: <i>${escapeHTML(r.log || 'No log')}</i>\n`;
+          const failedItems = [...queueResults.failed].reverse();
+          failedItems.forEach((r, i) => {
+            const timeStr = r.finishedAt.toLocaleString('en-GB', {
+              timeZone: 'Asia/Jakarta',
+              day: '2-digit',
+              month: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            });
+            const [datePart, timePart] = timeStr.split(', ');
+            const [d, m] = datePart.split('/');
+            const shortTime = `${d}/${m}, ${timePart}`;
+
+            summaryMsg += `${i + 1}. ${shortTime}\n`;
+            summaryMsg += `- <code>${escapeHTML(r.email)}</code>\n`;
+            summaryMsg += `- <code>${escapeHTML(r.password || '')}</code>\n`;
+            summaryMsg += `⚠️ Log: <i>${escapeHTML(r.log || 'No log')}</i>\n`;
             summaryMsg += `────────────────\n`;
           });
         }
