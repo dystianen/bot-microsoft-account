@@ -1,0 +1,12 @@
+services:
+  account-bot:
+    build: .
+    container_name: microsoft-account-bot
+    restart: always
+    network_mode: host
+    env_file: .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
