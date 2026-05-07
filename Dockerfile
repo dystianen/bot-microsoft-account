@@ -10,8 +10,9 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# ✅ Setelah bun install, pakai playwright dari node_modules
-RUN ./node_modules/.bin/playwright install chromium --with-deps
+# Chromium sudah tersedia di base image playwright
+# Cukup set environment variable path-nya
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY . .
 
