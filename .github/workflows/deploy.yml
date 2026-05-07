@@ -31,6 +31,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_PRIVATE_KEY }}
+          port: 2221
           script: |
             cd /home/${{ secrets.VPS_USERNAME }}/projects/bot-microsoft-account
             docker compose pull
