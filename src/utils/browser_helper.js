@@ -5,9 +5,18 @@
 /**
  * Delay with random jitter
  */
-const humanDelay = async (page, min = 1000, max = 3000) => {
+const humanDelay = async (page, min = 500, max = 1500) => {
   const delay = Math.floor(Math.random() * (max - min + 1) + min);
-  await page.waitForTimeout(delay);
+  try {
+    await page.waitForTimeout(delay);
+  } catch (err) {
+    // If page is closed during delay, skip gracefully
+    if (err.message?.includes('Target page, context or browser has been closed')) {
+      console.warn(`[DELAY] Page closed, skipping delay (${delay}ms)`);
+      return;
+    }
+    throw err;
+  }
 };
 
 /**

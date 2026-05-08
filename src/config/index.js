@@ -40,6 +40,6 @@ module.exports = {
     apiKey: process.env.TWOCAPTCHA_API_KEY,
   },
   headless: process.env.HEADLESS === 'true',
-  hardTimeout: 1.5 * 60 * 1000, // 90 seconds
-  paymentTimeout: 5 * 60 * 1000, // 300 seconds
+  hardTimeout: 45 * 1000, // 45 seconds (most operations <30s)
+  paymentTimeout: 2 * 60 * 1000,
 };

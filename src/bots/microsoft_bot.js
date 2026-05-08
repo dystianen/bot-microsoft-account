@@ -85,43 +85,102 @@ class MicrosoftBot {
     await browserHelper.randomMouseMove(this.page);
   }
 
-  async runWithMonitor(promise) {
+  async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
     let isDone = false;
     let errorMsg = null;
 
+    // ✅ Configurable polling interval (adaptive)
+    const POLL_INTERVAL = 2000; // 2s instead of 5s (reduces latency)
+    const POLL_TIMEOUT = timeout || HARD_TIMEOUT;
+
     const checkLoop = async () => {
+      const startTime = Date.now();
+
       while (!isDone) {
-        // CPU Saver: Relaxing polling interval from 2500ms to 5000ms
-        await this.page.waitForTimeout(5000).catch(() => {
+        // ✅ Check elapsed time to avoid exceeding hard timeout
+        const elapsed = Date.now() - startTime;
+        if (elapsed > POLL_TIMEOUT) {
+          console.warn(
+            `[MONITOR] Polling timeout after ${(elapsed / 1000).toFixed(1)}s, stopping...`
+          );
           isDone = true;
-        });
+          break;
+        }
+
+        // ✅ Wait with early exit capability
+        try {
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, POLL_INTERVAL);
+            // If isDone set, immediately resolve (don't wait full interval)
+            const checkInterval = setInterval(() => {
+              if (isDone) {
+                clearTimeout(timer);
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 100);
+          });
+        } catch (e) {
+          isDone = true;
+          break;
+        }
+
         if (isDone) break;
 
-        const detectedError = await this.checkForError();
-        if (detectedError) {
-          // ✅ Double-check: tunggu 2 detik lagi, lalu cek ulang sebelum throw
-          // Ini mencegah false-positive saat teks error muncul sementara (transisi halaman)
-          console.log(
-            `[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`
-          );
-          await this.page.waitForTimeout(2000).catch(() => {});
-          if (isDone) break; // Task selesai duluan, abaikan
-          const recheck = await this.checkForError();
-          if (recheck) {
-            errorMsg = recheck;
+        // ✅ Lightweight error check without blocking
+        try {
+          const detectedError = await this.checkForError();
+          if (detectedError) {
+            console.log(
+              `[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`
+            );
+            // Wait for re-check but with early exit
+            await new Promise((resolve) => {
+              const timer = setTimeout(async () => {
+                if (!isDone) {
+                  const recheck = await this.checkForError();
+                  if (recheck) {
+                    errorMsg = recheck;
+                    isDone = true;
+                  } else {
+                    console.log(`[MONITOR] False positive cleared, continuing...`);
+                  }
+                }
+                resolve();
+              }, 2000);
+
+              const checkInterval = setInterval(() => {
+                if (isDone) {
+                  clearTimeout(timer);
+                  clearInterval(checkInterval);
+                  resolve();
+                }
+              }, 100);
+            });
+          }
+        } catch (e) {
+          if (e.message?.includes('Target page')) {
             isDone = true;
+            errorMsg = e.message;
             break;
-          } else {
-            console.log(`[MONITOR] False positive cleared, continuing...`);
           }
         }
       }
     };
 
-    const result = await Promise.race([promise, checkLoop()]).finally(() => {
-      isDone = true;
-    });
+    // ✅ Race between main promise and monitoring loop
+    const result = await Promise.race([promise, checkLoop()])
+      .catch((err) => {
+        // Promise rejected
+        isDone = true;
+        throw err;
+      })
+      .finally(() => {
+        // ✅ Signal loop to stop (will exit on next iteration)
+        isDone = true;
+      });
 
+    // Check if error was detected during monitoring
     if (errorMsg) {
       throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
     }
@@ -130,8 +189,8 @@ class MicrosoftBot {
   }
 
   async waitForSpinnerGone(extraDelay = 0, spinnerTimeout = HARD_TIMEOUT) {
-    // 1. Tunggu sebentar karena spinner sering kali baru muncul beberapa saat setelah aksi klik
-    await this.page.waitForTimeout(500).catch(() => {});
+    // ✅ Reduced initial wait
+    await this.page.waitForTimeout(200).catch(() => {}); // Was 500ms
 
     const spinner = this.page.locator(SPINNER_SELECTOR).first();
     const spinnerVisible = await spinner.isVisible().catch(() => false);
@@ -148,18 +207,20 @@ class MicrosoftBot {
         console.log('[WAIT] Spinner still visible or check failed, continuing...');
       }
       console.log('[WAIT] Spinner gone.');
-      // Grace period agar DOM stabil setelah spinner hilang
-      await this.page.waitForTimeout(800).catch(() => {});
+
+      // ✅ Reduced grace period
+      await this.page.waitForTimeout(300).catch(() => {}); // Was 800ms
     }
 
-    // 2. Selesai spinner baru cek deteksi error (seperti instruksi USER)
+    // 2. Check error after spinner gone
     const postSpinnerError = await this.checkForError();
     if (postSpinnerError) {
       throw new Error(`MICROSOFT_ERROR: ${postSpinnerError}`);
     }
 
     if (extraDelay > 0) {
-      await this.humanDelay(extraDelay + 300);
+      // ✅ Reduced extra delay
+      await this.humanDelay(extraDelay + 100); // Was +300ms
     }
   }
 
@@ -633,7 +694,7 @@ class MicrosoftBot {
     );
     console.log(`[MAILPORARY] Opening Mailporary (forceNew: ${forceNew})...`);
 
-    const mailporaryPage = await this.page.context().newPage();
+    const mailporaryPage = await this.context.waitForEvent('page');
     try {
       await mailporaryPage.goto('https://mailporary.com/', {
         waitUntil: 'domcontentloaded',
@@ -692,7 +753,12 @@ class MicrosoftBot {
       await this._logStep(this._currentStepIndex || 6, `📧 Email baru didapat: ${finalEmail}`);
       return finalEmail;
     } finally {
-      await mailporaryPage.close().catch(() => {});
+      try {
+        mailporaryPage.removeAllListeners();
+        await mailporaryPage.close();
+      } catch (e) {
+        console.warn('[CLEANUP] Error closing mailporaryPage:', e.message);
+      }
     }
   }
 
@@ -1797,9 +1863,10 @@ class MicrosoftBot {
         .then(() => true)
         .catch(() => false);
 
+      // When click fails, use shorter retry delay
       if (!btnReady) {
         console.warn(`[WARN] Button not ready on attempt ${attempt}`);
-        await this.humanDelay(2000);
+        await this.humanDelay(1000, 2000);
         continue;
       }
 
@@ -1867,6 +1934,7 @@ class MicrosoftBot {
       ])
     );
   }
+
   async clickGetStartedButton() {
     await this._logStep(17, 'Klik tombol Get Started terakhir...');
 
@@ -2139,12 +2207,68 @@ class MicrosoftBot {
   // ─── Cleanup & orchestration ─────────────────────────────────────────────────
 
   async cleanup() {
-    try {
-      await this.browser.close();
-    } catch (e) {
-      console.error('Error closing browser:', e);
+    const cleanupSteps = [];
+
+    // ✅ Step 1: Close page
+    if (this.page) {
+      cleanupSteps.push(
+        (async () => {
+          try {
+            // Remove all event listeners first
+            this.page.removeAllListeners();
+
+            await this.page.close();
+            console.log('[CLEANUP] Page closed.');
+          } catch (e) {
+            console.warn('[CLEANUP] Error closing page:', e.message);
+          }
+          this.page = null;
+        })()
+      );
     }
 
+    // ✅ Step 2: Close context
+    if (this.context) {
+      cleanupSteps.push(
+        (async () => {
+          try {
+            // Unregister all routes
+            await this.context.unroute('**/*');
+
+            // Remove listeners
+            this.context.removeAllListeners();
+
+            await this.context.close();
+            console.log('[CLEANUP] Context closed.');
+          } catch (e) {
+            console.warn('[CLEANUP] Error closing context:', e.message);
+          }
+          this.context = null;
+        })()
+      );
+    }
+
+    // ✅ Step 3: Close browser
+    if (this.browser) {
+      cleanupSteps.push(
+        (async () => {
+          try {
+            await this.browser.close();
+            console.log('[CLEANUP] Browser closed.');
+          } catch (e) {
+            console.warn('[CLEANUP] Error closing browser:', e.message);
+          }
+          this.browser = null;
+        })()
+      );
+    }
+
+    // Execute all cleanup steps in parallel
+    await Promise.all(cleanupSteps).catch((e) => {
+      console.error('[CLEANUP] Error during cleanup:', e.message);
+    });
+
+    // ✅ Step 4: Delete profile folder
     if (config.profilePath && fs.existsSync(config.profilePath)) {
       try {
         fs.rmSync(config.profilePath, { recursive: true, force: true });
@@ -2153,6 +2277,8 @@ class MicrosoftBot {
         console.warn('[CLEANUP] Could not delete profile folder:', e.message);
       }
     }
+
+    console.log('[CLEANUP] Cleanup completed.');
   }
 
   async executeStep(name, stepIndex, fn, delay = null) {
