@@ -1952,15 +1952,16 @@ class MicrosoftBot {
         }
       }
 
-      // 2. Cek keberadaan iframe Arkose/Captcha secara eksplisit
-      const captchaIndicators = [
+      // 2. Cek keberadaan Arkose/Captcha secara eksplisit (termasuk multi-bahasa)
+      const captchaMarkers = i18n.getAllVariations('selectors.captcha');
+      const captchaSelectors = [
+        ...captchaMarkers.map((text) => `text=/${text}/i`),
+        ...captchaMarkers.map((text) => `[aria-label*="${text}" i]`),
         'button:has-text("solve the puzzle")',
         'button:has-text("résoudre le puzzle")',
-        'h2:has-text("Protecting your account")',
-        'h2:has-text("Protection de votre compte")',
       ];
 
-      for (const selector of captchaIndicators) {
+      for (const selector of captchaSelectors) {
         if (
           await this.page
             .locator(selector)
@@ -2001,13 +2002,7 @@ class MicrosoftBot {
         'terjadi sesuatu',
         'Terjadi kesalahan',
         'Sesuatu telah terjadi',
-        'Melindungi akun Anda',
         'try a different way',
-        'Protecting your account',
-        'Please solve the puzzle',
-        "so we know you're not a robot",
-        'Selesaikan teka-teki',
-        'agar kami tahu Anda bukan robot',
         'error code',
         'correlation id',
         '715-123280',
@@ -2016,6 +2011,7 @@ class MicrosoftBot {
         'identity could not be verified',
         'Nous avons rencontré un problème',
         ...i18n.getAllVariations('selectors.manual_review'),
+        ...captchaMarkers,
       ];
 
       for (const frame of this.page.frames()) {
@@ -2188,7 +2184,13 @@ class MicrosoftBot {
           const msg = err.message || '';
 
           // Handle Captcha: Ambil email baru & reload
-          if (msg.includes('CAPTCHA_DETECTED') || msg.includes('Protecting your account')) {
+          const isCaptcha =
+            msg.includes('CAPTCHA_DETECTED') ||
+            i18n
+              .getAllVariations('selectors.captcha')
+              .some((m) => msg.toLowerCase().includes(m.toLowerCase()));
+
+          if (isCaptcha) {
             if (this._emailFromMailporary) {
               const errorText = 'email dari maiporary terkena captcha';
               console.error(`[ERROR] ${errorText}`);
