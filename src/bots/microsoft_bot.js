@@ -693,7 +693,7 @@ class MicrosoftBot {
     );
     console.log(`[MAILPORARY] Opening Mailporary (forceNew: ${forceNew})...`);
 
-    const mailporaryPage = await this.context.waitForEvent('page');
+    const mailporaryPage = await this.page.context().newPage();
     try {
       await mailporaryPage.goto('https://mailporary.com/', {
         waitUntil: 'domcontentloaded',
