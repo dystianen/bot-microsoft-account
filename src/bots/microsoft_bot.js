@@ -4,6 +4,7 @@ const config = require('../config');
 const remoteLogger = require('../utils/logger');
 const i18n = require('../utils/i18n');
 const browserHelper = require('../utils/browser_helper');
+const captchaSolver = require('../utils/captcha_solver');
 
 // Dynamically build SPINNER_SELECTOR using all configured variations
 const spinnerTexts = i18n.getAllVariations('selectors.spinner_text');
@@ -2059,6 +2060,78 @@ class MicrosoftBot {
     return null;
   }
 
+  /**
+   * Handle FunCaptcha (Arkose Labs) using 2captcha
+   */
+  async handleFunCaptcha() {
+    console.log('[CAPTCHA] FunCaptcha detected, attempting to solve...');
+    await this._logStep(this.currentStep, '🧩 Captcha terdeteksi, mencoba menyelesaikan...');
+
+    try {
+      // Extract sitekey from Arkose iframe
+      const captchaData = await this.page.evaluate(() => {
+        const iframe = document.querySelector(
+          'iframe[src*="arkoselabs.com"], iframe[title*="Arkose"], iframe[src*="funcaptcha"]'
+        );
+        if (!iframe) return null;
+
+        const url = new URL(iframe.src);
+        const sitekey = url.searchParams.get('pk') || url.searchParams.get('sitekey');
+        const surl = url.searchParams.get('surl') || 'https://client-api.arkoselabs.com';
+
+        return { sitekey, surl };
+      });
+
+      // Microsoft common sitekey if extraction fails
+      const sitekey = captchaData?.sitekey || 'B7D8911C-5CC8-A9A3-35B0-554EAD444AD1';
+      const surl = captchaData?.surl || 'https://client-api.arkoselabs.com';
+
+      const token = await captchaSolver.solveFunCaptcha({
+        pageurl: this.page.url(),
+        sitekey: sitekey,
+        surl: surl,
+      });
+
+      console.log('[CAPTCHA] Token received, injecting into page...');
+
+      await this.page.evaluate((t) => {
+        // 1. Try postMessage (common for Arkose)
+        window.postMessage(
+          JSON.stringify({
+            eventId: 'challenge-complete',
+            payload: { sessionToken: t },
+          }),
+          '*'
+        );
+
+        // 2. Try hidden input
+        const tokenInputs = document.querySelectorAll(
+          'input[name*="verification_token" i], input[name*="fc-token" i], input[id*="verification_token" i]'
+        );
+        tokenInputs.forEach((input) => {
+          input.value = t;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        // 3. Try to call the callback if it exists in the window
+        // This is site-specific, but Arkose often has a callback
+        if (typeof window.arkoseCallback === 'function') {
+          window.arkoseCallback(t);
+        }
+      }, token);
+
+      await this.page.waitForTimeout(3000);
+      console.log('[CAPTCHA] Captcha handling complete.');
+      await this._logStep(this.currentStep, '✅ Captcha berhasil diselesaikan.');
+      return true;
+    } catch (e) {
+      console.error('[CAPTCHA] Error solving captcha:', e.message);
+      await this._logStep(this.currentStep, `❌ Gagal menyelesaikan captcha: ${e.message}`);
+      return false;
+    }
+  }
+
   async waitWithCheck(locator, timeout = HARD_TIMEOUT) {
     return await this.runWithMonitor(locator.waitFor({ state: 'visible', timeout }), timeout);
   }
@@ -2191,6 +2264,20 @@ class MicrosoftBot {
               .some((m) => msg.toLowerCase().includes(m.toLowerCase()));
 
           if (isCaptcha) {
+            console.log('[CAPTCHA] Captcha detected. Attempting to solve via 2captcha...');
+            const solved = await this.handleFunCaptcha();
+            if (solved) {
+              console.log('[CAPTCHA] Solver reported success, waiting for page to react...');
+              await this.waitForSpinnerGone(2000);
+              // Check if we're still on a captcha page
+              const stillCaptcha = await this.checkForError();
+              if (stillCaptcha?.includes('CAPTCHA')) {
+                console.log('[CAPTCHA] Still on captcha page after solve. Reloading...');
+              } else {
+                continue; // Retry the current step logic
+              }
+            }
+
             if (this._emailFromMailporary) {
               const errorText = 'email dari maiporary terkena captcha';
               console.error(`[ERROR] ${errorText}`);

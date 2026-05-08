@@ -36,6 +36,9 @@ module.exports = {
     token: process.env.TELEGRAM_BOT_TOKEN,
     logChatId: process.env.TELEGRAM_LOG_CHAT_ID,
   },
+  twoCaptcha: {
+    apiKey: process.env.TWOCAPTCHA_API_KEY,
+  },
   headless: process.env.HEADLESS === 'true',
   hardTimeout: 1.5 * 60 * 1000, // 90 seconds
   paymentTimeout: 5 * 60 * 1000, // 300 seconds
