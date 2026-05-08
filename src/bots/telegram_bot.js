@@ -6,6 +6,7 @@ const { SuccessAccount, VCC, UserConfig } = require('../db/models');
 const date = require('date-and-time');
 const adsPowerHelper = require('../utils/adspower_helper');
 const remoteLogger = require('../utils/logger');
+const monitor = require('../utils/monitor');
 
 // Global state for graceful shutdown
 let isShuttingDown = false;
@@ -16,6 +17,31 @@ async function startBot() {
   try {
     // Connect to MongoDB
     await connectDB();
+
+    // ✅ Log system info at startup
+    const os = require('os');
+    console.log('[STARTUP] System Info:');
+    console.log(`  CPU Cores: ${os.cpus().length}`);
+    console.log(`  Total Memory: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`);
+    console.log(`  Free Memory: ${Math.round(os.freemem() / 1024 / 1024 / 1024)}GB`);
+    console.log(`  Load Average: ${os.loadavg().join(', ')}`);
+
+    // ✅ Periodic memory report
+    setInterval(() => {
+      monitor.logDelta();
+    }, 30000); // Every 30 seconds
+
+    // ✅ Alert on memory spike
+    setInterval(() => {
+      const stats = monitor.getStats();
+      if (stats && stats.maxHeapUsed > 2000) {
+        // >2GB
+        console.warn(
+          `[ALERT] High memory usage detected: max=${stats.maxHeapUsed}MB, ` +
+            `avg=${stats.avgHeapUsed}MB (${stats.sampleCount} samples)`
+        );
+      }
+    }, 60000); // Every 60 seconds
 
     const token = config.telegram.token;
 
@@ -32,12 +58,12 @@ async function startBot() {
     console.log('Telegram Bot with MongoDB (ms365bot) started.');
 
     // Graceful Shutdown Handler
-    const shutdown = () => {
+    const shutdown = async () => {
       if (isShuttingDown) return;
-      console.log('\n[Graceful Shutdown] Signal received. Finishing current tasks...');
+      console.log('\n[Graceful Shutdown] Signal received. Closing resources...');
       isShuttingDown = true;
 
-      // Stop receiving new commands from Telegram
+      // ✅ Stop accepting new commands
       bot.stopPolling();
 
       if (activeAccountsCount === 0) {
@@ -45,13 +71,27 @@ async function startBot() {
         process.exit(0);
       } else {
         console.log(
-          `[Graceful Shutdown] Waiting for ${activeAccountsCount} active accounts to finish...`
+          `[Graceful Shutdown] Waiting for ${activeAccountsCount} active tasks to finish (max 60s)...`
         );
-        // Safety timeout to prevent hanging forever
-        setTimeout(() => {
-          console.log('[Graceful Shutdown] Timeout reached. Force exiting.');
+
+        // ✅ More aggressive timeout
+        const shutdownTimeout = setTimeout(() => {
+          console.log(
+            '[Graceful Shutdown] Timeout reached (60s). Force exiting. Active: ' +
+              activeAccountsCount
+          );
           process.exit(1);
-        }, 290000); // 4.8 minutes (matches kill_timeout in pm2)
+        }, 60000); // 60 seconds instead of 290
+
+        // ✅ Check periodically and exit early if done
+        const checkInterval = setInterval(() => {
+          if (activeAccountsCount === 0) {
+            clearInterval(checkInterval);
+            clearTimeout(shutdownTimeout);
+            console.log('[Graceful Shutdown] All tasks finished. Exiting.');
+            process.exit(0);
+          }
+        }, 1000);
       }
     };
 

@@ -3,6 +3,20 @@ services:
     image: dystian/microsoft-account-bot:latest
     shm_size: '2gb'
     container_name: microsoft-account-bot
+
+    # ✅ RESOURCE LIMITS
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0' # Max 4 CPU cores (400% usage)
+          memory: 4G # Max 4GB RAM
+        reservations:
+          cpus: '2.0' # Reserved min 2 cores
+          memory: 2G # Reserved min 2GB
+
+    # ✅ PID LIMIT (prevents zombie accumulation)
+    pids_limit: 512 # Max 512 PIDs in container
+
     restart: always
     network_mode: host
     env_file: .env

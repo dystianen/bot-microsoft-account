@@ -30,8 +30,9 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
   let result = null;
   let executionResult = null;
 
+  const startTime = Date.now();
+  console.log(`[Account ${index + 1}] Creating AdsPower profile...`);
   try {
-    console.log(`[Account ${index + 1}] Creating AdsPower profile...`);
     const proxyOverride =
       accountConfig.proxyHost &&
       accountConfig.proxyPort &&
@@ -113,6 +114,9 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
       err.message
     );
   } finally {
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[ACCOUNT] Total time: ${(elapsedMs / 1000).toFixed(1)}s`);
+
     if (executionResult && executionResult.status !== 'SUCCESS') {
       console.log(`[Account ${index + 1}] Waiting 5s before cleanup...`);
       await new Promise((resolve) => setTimeout(resolve, 5000));
