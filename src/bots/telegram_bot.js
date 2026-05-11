@@ -629,11 +629,17 @@ function initializeBotHandlers(bot) {
       };
 
       try {
-        let globalIdx = 0;
-        const pendingPromises = new Set();
+        let lastSpawnTime = 0;
+        const SPAWN_STAGGER = 20000; // 5 detik jeda antar browser (aman untuk AdsPower)
 
         while (true) {
-          if (activeWorkers < maxWorkers && session.accounts.length > 0 && !isShuttingDown) {
+          const now = Date.now();
+          if (
+            activeWorkers < maxWorkers &&
+            session.accounts.length > 0 &&
+            !isShuttingDown &&
+            now - lastSpawnTime >= SPAWN_STAGGER
+          ) {
             // ── Assign VCC BEFORE spawning the worker ──────────────────────────
             const vcc = getNextVcc();
             if (!vcc) {
@@ -646,20 +652,22 @@ function initializeBotHandlers(bot) {
             const currentIdx = globalIdx;
 
             activeWorkers++;
+            lastSpawnTime = now; // Update waktu terakhir spawn
+
             const promise = processAccount(accountData, currentIdx, vcc).finally(() => {
               activeWorkers--;
               pendingPromises.delete(promise);
             });
             pendingPromises.add(promise);
 
-            if (session.accounts.length > 0 || activeWorkers < maxWorkers) {
-              console.log(`[Queue] Waiting 20s before next account...`);
-              await new Promise((r) => setTimeout(r, 20000));
-            }
+            console.log(
+              `[Queue] Account ${currentIdx} spawned. Next in ${SPAWN_STAGGER / 1000}s...`
+            );
           } else if (activeWorkers === 0 && session.accounts.length === 0) {
             break;
           } else {
-            await new Promise((r) => setTimeout(r, 2000));
+            // Cek setiap 1 detik apakah ada slot atau stagger sudah habis
+            await new Promise((r) => setTimeout(r, 1000));
           }
         }
 

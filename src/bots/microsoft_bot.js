@@ -2,7 +2,8 @@ const { chromium } = require('playwright-core');
 const fs = require('fs');
 const config = require('../config');
 const remoteLogger = require('../utils/logger');
-const i18n = require('../utils/i18n');
+const I18n = require('../utils/i18n');
+const i18n = new I18n(); // Global instance for static selectors
 const browserHelper = require('../utils/browser_helper');
 
 // Dynamically build SPINNER_SELECTOR using all configured variations
@@ -26,9 +27,7 @@ class MicrosoftBot {
     this.page = null;
     this.accountConfig = accountConfig;
     // Set language for this instance
-    if (accountConfig.language) {
-      i18n.setLanguage(accountConfig.language);
-    }
+    this.i18n = new I18n(accountConfig.language || 'en');
     this.originalEmail = accountConfig.microsoftAccount.email || 'New Account';
     this.onPaymentSaved = onPaymentSaved;
     this._paymentSavedTriggered = false;
