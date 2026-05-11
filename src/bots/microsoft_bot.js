@@ -1035,7 +1035,7 @@ class MicrosoftBot {
       'div[role="combobox"][id*="size" i], div[role="combobox"][data-testid*="size" i], select[id*="size" i]',
       this.accountConfig.microsoftAccount.companySize
     );
-    await this.humanDelay(600, 1000);
+    await this.page.waitForTimeout(400);
 
     // === CONTACT ===
     const phoneLocator = this.getGenericLocator(['phone', 'téléphone', 'numéro']);
@@ -1089,8 +1089,8 @@ class MicrosoftBot {
     await this.humanDelay(600, 1200);
     await this.randomMouseMove();
     if (Math.random() > 0.5) await this.humanScroll();
-    console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(800, 1500);
+    console.log("[STEP 8] Snappy delay before submit...");
+    await this.page.waitForTimeout(500);
 
     await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
@@ -1333,8 +1333,8 @@ class MicrosoftBot {
     }
     await this.humanDelay(800, 1500);
     await this.randomMouseMove();
-    console.log("[STEP 10] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(1000, 1800);
+    console.log("[STEP 10] Snappy delay before submit...");
+    await this.page.waitForTimeout(600);
 
     await this.clickButtonWithPossibleNames([
       ...i18n.getAllVariations('buttons.next'),
@@ -1505,17 +1505,17 @@ class MicrosoftBot {
     await this.waitForVisible(cardLocator);
 
     console.log('Typing card number...');
-    await cardLocator.click();
+    // ✅ Use humanPaste directly (internal click handling)
     await this.humanPaste(cardLocator, this.accountConfig.payment.cardNumber);
-    await this.humanDelay(592);
+    await this.page.waitForTimeout(250);
 
     console.log('Typing CVV...');
     const cvvLocator = this.page
       .locator('input[id*="cvv" i], input[data-testid*="cvv" i], input[name*="cvv" i]')
       .first();
-    await cvvLocator.click();
+    // ✅ Removed redundant click before humanPaste
     await this.humanPaste(cvvLocator, this.accountConfig.payment.cvv);
-    await this.humanDelay(510);
+    await this.page.waitForTimeout(200);
 
     let expMonth = this.accountConfig.payment.expMonth.toString();
     if (expMonth.length === 1) expMonth = '0' + expMonth;
@@ -1525,14 +1525,14 @@ class MicrosoftBot {
       'div[role="combobox"][id*="month" i], div[role="combobox"][data-testid*="month" i], select[id*="month" i]',
       expMonth
     );
-    await this.humanDelay(400);
+    await this.page.waitForTimeout(200);
 
     console.log('Selecting expiry year:', this.accountConfig.payment.expYear);
     await this.selectDropdownByText(
       'div[role="combobox"][id*="year" i], div[role="combobox"][data-testid*="year" i], select[id*="year" i]',
       this.accountConfig.payment.expYear
     );
-    await this.humanDelay(500);
+    await this.page.waitForTimeout(250);
 
     console.log('VCC details filled');
   }
@@ -2220,9 +2220,9 @@ class MicrosoftBot {
     const firstCheck = await this.checkForError();
     if (firstCheck) {
       console.log(
-        `[executeStep] Possible error after "${name}": "${firstCheck}", re-checking in 1.5s...`
+        `[executeStep] Possible error after "${name}": "${firstCheck}", re-checking in 0.8s...`
       );
-      await this.humanDelay(1500);
+      await this.page.waitForTimeout(800);
       const recheck = await this.checkForError();
       if (recheck) {
         throw new Error(`MICROSOFT_ERROR: ${recheck} (Detected after step "${name}")`);
@@ -2236,7 +2236,7 @@ class MicrosoftBot {
   async run() {
     this._currentStep = 'Initializing';
     try {
-      await this.executeStep('Connecting to browser', 1, () => this.connect(), [1000, 3000]);
+      await this.executeStep('Connecting to browser', 1, () => this.connect(), [400, 800]);
 
       /* 
       // Ambil email dari Mailporary jika tidak ada di config atau diminta khusus
@@ -2279,10 +2279,10 @@ class MicrosoftBot {
             'Clicking product page Next',
             5,
             () => this.clickProductNextButton(),
-            [300, 600]
+            [300, 500]
           );
 
-          await this.executeStep('Filling email', 6, () => this.fillEmail(), [1000, 2500]);
+          await this.executeStep('Filling email', 6, () => this.fillEmail(), [600, 1200]);
 
           await this.executeStep(
             'Submitting email & waiting for Setup',
@@ -2356,7 +2356,7 @@ class MicrosoftBot {
           `Failed to complete setup after ${MAX_SETUP_RETRIES} attempts due to persistent OTP/Rate-limits.`
         );
       }
-      await this.executeStep('Filling basic info', 9, () => this.fillBasicInfo(), [1500, 3500]);
+      await this.executeStep('Filling basic info', 9, () => this.fillBasicInfo(), [800, 1500]);
       await this.executeStep(
         'Confirming address (pre-password)',
         10,
@@ -2408,13 +2408,13 @@ class MicrosoftBot {
         'Accepting trial & clicking Start',
         17,
         () => this.acceptTrialAndStart(),
-        [800, 1500]
+        [500, 1000]
       );
       await this.executeStep(
         'Clicking Get Started',
         18,
         () => this.clickGetStartedButton(),
-        [800, 1500]
+        [500, 1000]
       );
 
       this._currentStep = 'Extracting final domain account';
