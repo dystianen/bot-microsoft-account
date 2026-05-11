@@ -1035,7 +1035,7 @@ class MicrosoftBot {
       'div[role="combobox"][id*="size" i], div[role="combobox"][data-testid*="size" i], select[id*="size" i]',
       this.accountConfig.microsoftAccount.companySize
     );
-    await this.page.waitForTimeout(400);
+    await this.humanDelay(600, 1000);
 
     // === CONTACT ===
     const phoneLocator = this.getGenericLocator(['phone', 'téléphone', 'numéro']);
@@ -1089,8 +1089,8 @@ class MicrosoftBot {
     await this.humanDelay(600, 1200);
     await this.randomMouseMove();
     if (Math.random() > 0.5) await this.humanScroll();
-    console.log("[STEP 8] Snappy delay before submit...");
-    await this.page.waitForTimeout(500);
+    console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
+    await this.humanDelay(800, 1500);
 
     await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
@@ -1333,7 +1333,7 @@ class MicrosoftBot {
     }
     await this.humanDelay(800, 1500);
     await this.randomMouseMove();
-    console.log("[STEP 10] Snappy delay before submit...");
+    console.log('[STEP 10] Snappy delay before submit...');
     await this.page.waitForTimeout(600);
 
     await this.clickButtonWithPossibleNames([
