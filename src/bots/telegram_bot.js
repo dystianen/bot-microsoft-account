@@ -491,6 +491,8 @@ function initializeBotHandlers(bot) {
         success: [],
         failed: [],
       };
+      let globalIdx = 0;
+      const pendingPromises = new Set();
 
       // ─── VCC round-robin state ───────────────────────────────────────────────
       // vccPool holds only ACTIVE vccs with saldo > 0.
