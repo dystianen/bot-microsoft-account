@@ -483,6 +483,8 @@ function initializeBotHandlers(bot) {
 
     const runQueue = async () => {
       let activeWorkers = 0;
+      let globalIdx = 0;
+      const pendingPromises = new Set();
       const maxWorkers = userConf.concurrencyLimit;
       const originalTotal = session.accounts.length;
       const queueResults = {
@@ -684,12 +686,13 @@ function initializeBotHandlers(bot) {
           ? `🛑 <b>Batch Queue Stopped Manually</b>\n`
           : `🏁 <b>Batch Queue Finished - SIGN UP</b>\n`;
 
-        summaryMsg += `🔢 Total Queue: <code>${originalTotal}</code>\n`;
+        summaryMsg += `🔢 Total Queue: <code>${processedCount}</code>\n`;
         summaryMsg += `✅ Success: <code>${queueResults.success.length}</code>\n`;
         summaryMsg += `❌ Failed: <code>${queueResults.failed.length}</code>\n`;
 
-        if (processedCount < originalTotal) {
-          summaryMsg += `🛑 Stopped: <code>${originalTotal - processedCount}</code> accounts skipped\n`;
+        const skipped = originalTotal - processedCount;
+        if (session.forceStop && skipped > 0) {
+          summaryMsg += `🛑 Stopped: <code>${skipped}</code> accounts skipped\n`;
         }
         summaryMsg += `\n`;
 
