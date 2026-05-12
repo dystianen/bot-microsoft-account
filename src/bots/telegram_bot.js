@@ -632,7 +632,7 @@ function initializeBotHandlers(bot) {
 
       try {
         let lastSpawnTime = 0;
-        const SPAWN_STAGGER = 20000; // 5 detik jeda antar browser (aman untuk AdsPower)
+        const SPAWN_STAGGER = 40000;
 
         while (true) {
           const now = Date.now();
