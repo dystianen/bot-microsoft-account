@@ -33,6 +33,8 @@ class MicrosoftBot {
     this._paymentSavedTriggered = false;
     this.currentStep = 0;
     this._setupBtnReady = false;
+    this._lastErrorCheck = 0;
+    this._lastErrorResult = null;
   }
 
   async _logStep(stepNum, msg) {
@@ -86,75 +88,25 @@ class MicrosoftBot {
   async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
     let isDone = false;
     let errorMsg = null;
-
-    // ✅ Configurable polling interval (adaptive)
-    const POLL_INTERVAL = 2000; // 2s instead of 5s (reduces latency)
-    const POLL_TIMEOUT = timeout || HARD_TIMEOUT;
+    const POLL_INTERVAL = 3000; // Naikan ke 3s — check lebih jarang, lebih ringan
 
     const checkLoop = async () => {
-      const startTime = Date.now();
-
       while (!isDone) {
-        // ✅ Check elapsed time to avoid exceeding hard timeout
-        const elapsed = Date.now() - startTime;
-        if (elapsed > POLL_TIMEOUT) {
-          console.warn(
-            `[MONITOR] Polling timeout after ${(elapsed / 1000).toFixed(1)}s, stopping...`
-          );
-          isDone = true;
-          break;
-        }
-
-        // ✅ Wait with early exit capability
-        try {
-          await new Promise((resolve) => {
-            const timer = setTimeout(resolve, POLL_INTERVAL);
-            // If isDone set, immediately resolve (don't wait full interval)
-            const checkInterval = setInterval(() => {
-              if (isDone) {
-                clearTimeout(timer);
-                clearInterval(checkInterval);
-                resolve();
-              }
-            }, 100);
-          });
-        } catch (e) {
-          isDone = true;
-          break;
-        }
-
+        // Gunakan single sleep, bukan nested setInterval
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
         if (isDone) break;
 
-        // ✅ Lightweight error check without blocking
         try {
           const detectedError = await this.checkForError();
           if (detectedError) {
-            console.log(
-              `[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`
-            );
-            // Wait for re-check but with early exit
-            await new Promise((resolve) => {
-              const timer = setTimeout(async () => {
-                if (!isDone) {
-                  const recheck = await this.checkForError();
-                  if (recheck) {
-                    errorMsg = recheck;
-                    isDone = true;
-                  } else {
-                    console.log(`[MONITOR] False positive cleared, continuing...`);
-                  }
-                }
-                resolve();
-              }, 2000);
-
-              const checkInterval = setInterval(() => {
-                if (isDone) {
-                  clearTimeout(timer);
-                  clearInterval(checkInterval);
-                  resolve();
-                }
-              }, 100);
-            });
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            if (isDone) break;
+            const recheck = await this.checkForError();
+            if (recheck) {
+              errorMsg = recheck;
+              isDone = true;
+              break;
+            }
           }
         } catch (e) {
           if (e.message?.includes('Target page')) {
@@ -166,60 +118,42 @@ class MicrosoftBot {
       }
     };
 
-    // ✅ Race between main promise and monitoring loop
-    const result = await Promise.race([promise, checkLoop()])
-      .catch((err) => {
-        // Promise rejected
-        isDone = true;
-        throw err;
-      })
-      .finally(() => {
-        // ✅ Signal loop to stop (will exit on next iteration)
-        isDone = true;
-      });
-
-    // Check if error was detected during monitoring
-    if (errorMsg) {
-      throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
+    try {
+      const result = await Promise.race([promise, checkLoop()]);
+      isDone = true;
+      if (errorMsg) throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
+      return result;
+    } catch (err) {
+      isDone = true;
+      throw err;
     }
-
-    return result;
   }
 
   async waitForSpinnerGone(extraDelay = 0, spinnerTimeout = HARD_TIMEOUT) {
-    // ✅ Reduced initial wait
-    await this.page.waitForTimeout(200).catch(() => {}); // Was 500ms
-
+    // Fast-path: cek dulu tanpa delay
     const spinner = this.page.locator(SPINNER_SELECTOR).first();
     const spinnerVisible = await spinner.isVisible().catch(() => false);
 
-    if (spinnerVisible) {
-      console.log('[WAIT] Spinner detected, waiting until hidden...');
-      try {
-        await this.runWithMonitor(
-          spinner.waitFor({ state: 'hidden', timeout: spinnerTimeout }),
-          spinnerTimeout
-        );
-      } catch (e) {
-        if (e.message.includes('MICROSOFT_ERROR')) throw e;
-        console.log('[WAIT] Spinner still visible or check failed, continuing...');
-      }
-      console.log('[WAIT] Spinner gone.');
-
-      // ✅ Reduced grace period
-      await this.page.waitForTimeout(300).catch(() => {}); // Was 800ms
+    if (!spinnerVisible) {
+      // Spinner tidak ada — skip semua wait, langsung error check
+      if (extraDelay > 0) await this.page.waitForTimeout(Math.min(extraDelay, 500));
+      return;
     }
 
-    // 2. Check error after spinner gone
-    const postSpinnerError = await this.checkForError();
-    if (postSpinnerError) {
-      throw new Error(`MICROSOFT_ERROR: ${postSpinnerError}`);
+    // Spinner ada — tunggu hilang
+    console.log('[WAIT] Spinner detected, waiting...');
+    try {
+      await spinner.waitFor({ state: 'hidden', timeout: spinnerTimeout });
+    } catch (e) {
+      if (e.message.includes('MICROSOFT_ERROR')) throw e;
     }
 
-    if (extraDelay > 0) {
-      // ✅ Reduced extra delay
-      await this.humanDelay(extraDelay + 100); // Was +300ms
-    }
+    await this.page.waitForTimeout(100); // minimal grace period
+
+    const postError = await this.checkForError();
+    if (postError) throw new Error(`MICROSOFT_ERROR: ${postError}`);
+
+    if (extraDelay > 0) await this.page.waitForTimeout(extraDelay);
   }
 
   async waitForVisible(locator) {
@@ -278,21 +212,6 @@ class MicrosoftBot {
       ),
     ]);
 
-    // this.browser = await chromium.launch({
-    //   headless:
-    //     this.accountConfig?.headless !== undefined ? this.accountConfig.headless : config.headless,
-    //   args: [
-    //     '--no-sandbox',
-    //     '--disable-setuid-sandbox',
-    //     '--incognito',
-    //     '--disable-blink-features=AutomationControlled',
-    //     '--disable-gpu',
-    //     '--disable-dev-shm-usage',
-    //     '--mute-audio',
-    //     '--window-position=0,0',
-    //   ],
-    // });
-
     const contexts = this.browser.contexts();
     this.context = contexts.length > 0 ? contexts[0] : await this.browser.newContext();
 
@@ -300,15 +219,25 @@ class MicrosoftBot {
     this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
     this.profileId = this.wsUrl.split('/').pop();
 
-    // --- CPU Saver: Resource Blocking (Network Interception) ---
-    // Memblokir assets gambar, media, dan font. Dipertahankan stylesheet (CSS) karena dibutuhkan untuk selector layout.
+    const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
+    const BLOCKED_URL_PATTERNS = [
+      /clarity\.ms/,
+      /google-analytics/,
+      /doubleclick/,
+      /facebook\.net/,
+      /bat\.bing\.com/, // Microsoft Clarity/telemetry
+      /c\.bing\.com/,
+      /browser\.pipe\.aria/, // Microsoft telemetry
+    ];
+
     await this.context.route('**/*', (route) => {
       const type = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(type)) {
-        route.abort('blockedbyclient');
-      } else {
-        route.continue();
-      }
+      const url = route.request().url();
+
+      if (BLOCKED_RESOURCE_TYPES.includes(type)) return route.abort('blockedbyclient');
+      if (BLOCKED_URL_PATTERNS.some((p) => p.test(url))) return route.abort('blockedbyclient');
+
+      route.continue();
     });
     // -------------------------------------------------------------
 
@@ -1052,13 +981,12 @@ class MicrosoftBot {
     await this._fillAddressInDomOrder();
 
     // === WEBSITE DROPDOWN ===
-    await this.humanDelay(914);
-    await this.humanScroll();
+    await this.page.waitForTimeout(200);
     await this.selectDropdownByText(
       'div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]',
       ['No', 'Tidak', 'Non']
     );
-    await this.humanDelay(800, 1500);
+    await this.humanDelay(300, 600);
 
     // === CHECKBOXES ===
     try {
@@ -1085,11 +1013,11 @@ class MicrosoftBot {
     }
 
     // === SUBMIT ===
-    await this.humanDelay(600, 1200);
+    await this.humanDelay(400, 700);
     await this.randomMouseMove();
     if (Math.random() > 0.5) await this.humanScroll();
     console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(800, 1500);
+    await this.humanDelay(300, 600);
 
     await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
@@ -2016,6 +1944,19 @@ class MicrosoftBot {
   // ─── Error detection ─────────────────────────────────────────────────────────
 
   async checkForError() {
+    const now = Date.now();
+    // Return cached result jika masih fresh
+    const ERROR_CHECK_CACHE_MS = 1500;
+    if (now - this._lastErrorCheck < ERROR_CHECK_CACHE_MS) {
+      return this._lastErrorResult;
+    }
+
+    this._lastErrorCheck = now;
+    this._lastErrorResult = await this._checkForErrorImpl();
+    return this._lastErrorResult;
+  }
+
+  async _checkForErrorImpl() {
     try {
       // 1. Check title & URL for obvious error states
       const title = await this.page.title().catch(() => '');
