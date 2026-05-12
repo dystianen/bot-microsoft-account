@@ -1720,6 +1720,23 @@ class MicrosoftBot {
       }
 
       console.error(`[ERROR] Payment error detected: ${errorText}`);
+
+      const bodyText = await this.page.textContent('body').catch(() => '');
+      if (
+        /something happened|terjadi kesalahan|terjadi sesuatu|une erreur s'est produite|un problème est survenu/i.test(
+          bodyText
+        )
+      ) {
+        console.warn(
+          '[WARN] Microsoft 715-123280 detected post-payment. Decreasing VCC saldo as requested.'
+        );
+        await this.triggerPaymentSaved();
+
+        throw new Error(
+          `SOMETHING_HAPPENED (error 715-123280) post-payment. Decreasing VCC saldo as requested.`
+        );
+      }
+
       throw new Error(`PAYMENT_DECLINED: ${errorText}`);
     } else if (result === null) {
       console.warn('[WARN] Payment result timeout - long loading time, trigger payment saved');
