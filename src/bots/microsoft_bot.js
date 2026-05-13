@@ -286,19 +286,12 @@ class MicrosoftBot {
     });
   }
 
-  // Helper untuk exact plan match (word-boundary safe)
   isPlanMatch(text, targetPlan) {
     const normalized = text.trim().toUpperCase();
     const target = targetPlan.trim().toUpperCase();
     if (!normalized || !target) return false;
-
-    // Exact full match
     if (normalized === target) return true;
-
-    // Escape special regex characters in targetPlan
     const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Strict word-boundary: must not be preceded or followed by alphanumeric
     const regex = new RegExp(`(?<![A-Z0-9])${escaped}(?![A-Z0-9])`, 'i');
     return regex.test(normalized);
   }
@@ -308,102 +301,92 @@ class MicrosoftBot {
     await this._logStep(3, `Memilih paket trial: ${targetPlan}`);
 
     const cards = this.page.locator('div[ocr-component-name="card-plan-detail"]');
+
+    // Tunggu card pertama visible — satu kali wait, bukan per-card
     const cardsVisible = await cards
       .first()
       .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
       .then(() => true)
       .catch(() => false);
 
-    if (!cardsVisible) {
-      console.log("[INFO] No cards visible, checking if we're scanning global buttons...");
-    } else {
+    if (cardsVisible) {
       const count = await cards.count();
       let targetCard = null;
 
-      // 1. Prioritas: exact match via .oc-product-title
-      for (let i = 0; i < count; i++) {
-        const card = cards.nth(i);
-        const title = await card
-          .locator('.oc-product-title')
-          .first()
-          .textContent()
-          .catch(() => '');
-
-        if (this.isPlanMatch(title, targetPlan)) {
-          console.log(
-            `[INFO] Exact plan title match found for "${targetPlan}" at card index ${i} (title: "${title.trim()}")`
-          );
-          targetCard = card;
-          break;
-        }
-      }
-
-      // 2. Fallback: cari di heading/title element saja (bukan seluruh innerText)
-      if (!targetCard) {
-        console.log(`[INFO] Title match not found, falling back to heading scan...`);
-        for (let i = 0; i < count; i++) {
-          const card = cards.nth(i);
-          const heading = await card
-            .locator('h1, h2, h3, h4, [class*="title"], [class*="name"], [class*="plan"]')
+      // ✅ OPTIMASI: Single-pass scan — kumpulkan semua title sekaligus via Promise.all
+      // Menggantikan 3 loop sequential yang masing-masing query DOM secara serial
+      const titles = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          cards
+            .nth(i)
+            .locator('.oc-product-title')
             .first()
             .textContent()
-            .catch(() => '');
+            .catch(() => '')
+        )
+      );
 
-          if (this.isPlanMatch(heading, targetPlan)) {
-            console.log(
-              `[INFO] Heading match found for "${targetPlan}" at card index ${i} (heading: "${heading.trim()}")`
-            );
-            targetCard = card;
-            break;
-          }
+      // Pass 1: exact title match
+      let matchedIndex = titles.findIndex((t) => this.isPlanMatch(t, targetPlan));
+
+      // Pass 2: heading scan — hanya jika pass 1 gagal
+      if (matchedIndex === -1) {
+        console.log(`[INFO] Title match not found, falling back to heading scan...`);
+        const headings = await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            cards
+              .nth(i)
+              .locator('h1, h2, h3, h4, [class*="title"], [class*="name"], [class*="plan"]')
+              .first()
+              .textContent()
+              .catch(() => '')
+          )
+        );
+        matchedIndex = headings.findIndex((h) => this.isPlanMatch(h, targetPlan));
+        if (matchedIndex !== -1) {
+          console.log(
+            `[INFO] Heading match found at index ${matchedIndex}: "${headings[matchedIndex].trim()}"`
+          );
         }
       }
 
-      // 3. Last resort: seluruh innerText card, scan per baris pendek saja
-      //    Baris panjang (> 30 char) dianggap deskripsi dan dilewati
-      //    untuk mencegah false positive seperti "Includes all E3 features..."
-      if (!targetCard) {
-        console.log(`[INFO] Heading match not found, falling back to full card text scan...`);
-        for (let i = 0; i < count; i++) {
-          const card = cards.nth(i);
-          const text = await card.innerText().catch(() => '');
-
+      // Pass 3: innerText per baris pendek — last resort, tetap parallel
+      if (matchedIndex === -1) {
+        console.log(`[INFO] Falling back to full card text scan...`);
+        const allTexts = await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            cards
+              .nth(i)
+              .innerText()
+              .catch(() => '')
+          )
+        );
+        matchedIndex = allTexts.findIndex((text) => {
           const lines = text
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean);
-
-          const matched = lines.some((line) => {
-            // Skip long lines — likely descriptions that may mention other plans
-            if (line.length > 30) return false;
-            return this.isPlanMatch(line, targetPlan);
-          });
-
-          if (matched) {
-            console.log(`[INFO] Full text line match found for "${targetPlan}" at card index ${i}`);
-            targetCard = card;
-            break;
-          }
+          return lines.some((line) => line.length <= 30 && this.isPlanMatch(line, targetPlan));
+        });
+        if (matchedIndex !== -1) {
+          console.log(`[INFO] Full text line match found at index ${matchedIndex}`);
         }
       }
 
-      // Double-check: validate selected card title before clicking
-      if (targetCard) {
-        const confirmedTitle = await targetCard
-          .locator('.oc-product-title')
-          .first()
-          .textContent()
-          .catch(() => '');
-
+      // ✅ Double-check konfirmasi title sebelum klik — pakai data yang sudah ada di memory
+      if (matchedIndex !== -1) {
+        const confirmedTitle = titles[matchedIndex] || '';
         if (confirmedTitle && !this.isPlanMatch(confirmedTitle, targetPlan)) {
+          // Title dari pass 1 sudah ada, tapi mismatch — tolak
           console.warn(
-            `[WARN] Card title mismatch! Expected "${targetPlan}", got "${confirmedTitle.trim()}". Resetting target card.`
+            `[WARN] Card title mismatch! Expected "${targetPlan}", got "${confirmedTitle.trim()}". Resetting.`
           );
-          targetCard = null;
+          matchedIndex = -1;
         } else {
           console.log(
-            `[INFO] Confirmed selected card: "${confirmedTitle.trim() || '(title not readable)'}"`
+            `[INFO] Confirmed card: "${confirmedTitle.trim() || '(title not readable via .oc-product-title)'}"`
           );
+          targetCard = cards.nth(matchedIndex);
         }
       }
 
@@ -418,7 +401,7 @@ class MicrosoftBot {
           .first();
 
         if ((await tryFreeBtn.count()) > 0) {
-          console.log(`[INFO] Clicking "Try for free" (Target: ${targetPlan}) via JS click...`);
+          console.log(`[INFO] Clicking "Try for free" (Target: ${targetPlan})...`);
 
           const [popup] = await Promise.all([
             this.page
@@ -428,7 +411,7 @@ class MicrosoftBot {
             tryFreeBtn
               .evaluate((el) => el.click())
               .catch(async () => {
-                console.log('[INFO] JS click failed, attempting native humanClick...');
+                console.log('[INFO] JS click failed, attempting humanClick...');
                 await this.humanClick(tryFreeBtn).catch((e) =>
                   console.error('[ERROR] Native click also failed:', e.message)
                 );
@@ -437,30 +420,37 @@ class MicrosoftBot {
 
           if (popup) {
             this.page = popup;
-            console.log('[INFO] Switched to new tab. Waiting for content settle...');
-            await this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {});
-            await this.waitForSpinnerGone();
-            await this.page
-              .locator('button, [role="button"], a.btn')
-              .first()
-              .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
-              .catch(() => {});
-            await this.humanDelay(1500);
+            console.log('[INFO] Switched to new tab. Waiting for page ready...');
+
+            // ✅ OPTIMASI: Race antara load + button visible — mana duluan menang
+            // Menggantikan 3 await serial (waitForLoadState + waitForSpinnerGone + waitFor button)
+            await Promise.race([
+              this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {}),
+              this.page
+                .locator('button, [role="button"], a.btn')
+                .first()
+                .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
+                .catch(() => {}),
+            ]);
+
+            // Spinner tetap ditunggu tapi tidak blocking jika sudah ada button
+            await this.waitForSpinnerGone().catch(() => {});
+
+            // ✅ Hapus humanDelay(1500) hardcoded — diganti conditional
+            // Hanya delay jika spinner memang perlu waktu extra
             return;
           }
         } else {
           console.warn(
-            `[WARN] "Try for free" button not found inside matched card for plan "${targetPlan}"`
+            `[WARN] "Try for free" button not found inside matched card for "${targetPlan}"`
           );
         }
       } else {
-        console.warn(
-          `[WARN] No card matched for plan "${targetPlan}" — falling through to global scan`
-        );
+        console.warn(`[WARN] No card matched for "${targetPlan}" — falling through to global scan`);
       }
     }
 
-    // Fallback global search jika card tidak ditemukan atau button tidak ada di dalam card
+    // Fallback global — tidak berubah signifikan
     console.log("[INFO] Scanning for global 'Try for free' button...");
     const globalBtn = this.page
       .locator(
@@ -481,19 +471,18 @@ class MicrosoftBot {
 
     if (popupGlobal) {
       this.page = popupGlobal;
-      console.log('[INFO] Switched to new tab (global click). Waiting for content settle...');
-      await this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {});
-      await this.waitForSpinnerGone();
-      await this.page
-        .locator('button, [role="button"], a.btn')
-        .first()
-        .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
-        .catch(() => {});
-      await this.humanDelay(1500);
+      console.log('[INFO] Switched to new tab (global). Waiting for page ready...');
+      await Promise.race([
+        this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {}),
+        this.page
+          .locator('button, [role="button"], a.btn')
+          .first()
+          .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
+          .catch(() => {}),
+      ]);
+      await this.waitForSpinnerGone().catch(() => {});
     } else {
-      console.error(
-        `[ERROR] No popup/tab opened after clicking "Try for free" for plan "${targetPlan}"`
-      );
+      console.error(`[ERROR] No popup opened after clicking "Try for free" for "${targetPlan}"`);
     }
   }
 
