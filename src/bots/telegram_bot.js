@@ -483,6 +483,8 @@ function initializeBotHandlers(bot) {
 
     const runQueue = async () => {
       let activeWorkers = 0;
+      let globalIdx = 0;
+      const pendingPromises = new Set();
       const maxWorkers = userConf.concurrencyLimit;
       const originalTotal = session.accounts.length;
       const queueResults = {
@@ -629,11 +631,17 @@ function initializeBotHandlers(bot) {
       };
 
       try {
-        let globalIdx = 0;
-        const pendingPromises = new Set();
+        let lastSpawnTime = 0;
+        const SPAWN_STAGGER = 40000;
 
         while (true) {
-          if (activeWorkers < maxWorkers && session.accounts.length > 0 && !isShuttingDown) {
+          const now = Date.now();
+          if (
+            activeWorkers < maxWorkers &&
+            session.accounts.length > 0 &&
+            !isShuttingDown &&
+            now - lastSpawnTime >= SPAWN_STAGGER
+          ) {
             // ── Assign VCC BEFORE spawning the worker ──────────────────────────
             const vcc = getNextVcc();
             if (!vcc) {
@@ -646,20 +654,22 @@ function initializeBotHandlers(bot) {
             const currentIdx = globalIdx;
 
             activeWorkers++;
+            lastSpawnTime = now; // Update waktu terakhir spawn
+
             const promise = processAccount(accountData, currentIdx, vcc).finally(() => {
               activeWorkers--;
               pendingPromises.delete(promise);
             });
             pendingPromises.add(promise);
 
-            if (session.accounts.length > 0 || activeWorkers < maxWorkers) {
-              console.log(`[Queue] Waiting 20s before next account...`);
-              await new Promise((r) => setTimeout(r, 20000));
-            }
+            console.log(
+              `[Queue] Account ${currentIdx} spawned. Next in ${SPAWN_STAGGER / 1000}s...`
+            );
           } else if (activeWorkers === 0 && session.accounts.length === 0) {
             break;
           } else {
-            await new Promise((r) => setTimeout(r, 2000));
+            // Cek setiap 1 detik apakah ada slot atau stagger sudah habis
+            await new Promise((r) => setTimeout(r, 1000));
           }
         }
 
@@ -676,12 +686,13 @@ function initializeBotHandlers(bot) {
           ? `🛑 <b>Batch Queue Stopped Manually</b>\n`
           : `🏁 <b>Batch Queue Finished - SIGN UP</b>\n`;
 
-        summaryMsg += `🔢 Total Queue: <code>${originalTotal}</code>\n`;
+        summaryMsg += `🔢 Total Queue: <code>${processedCount}</code>\n`;
         summaryMsg += `✅ Success: <code>${queueResults.success.length}</code>\n`;
         summaryMsg += `❌ Failed: <code>${queueResults.failed.length}</code>\n`;
 
-        if (processedCount < originalTotal) {
-          summaryMsg += `🛑 Stopped: <code>${originalTotal - processedCount}</code> accounts skipped\n`;
+        const skipped = originalTotal - processedCount;
+        if (session.forceStop && skipped > 0) {
+          summaryMsg += `🛑 Stopped: <code>${skipped}</code> accounts skipped\n`;
         }
         summaryMsg += `\n`;
 
