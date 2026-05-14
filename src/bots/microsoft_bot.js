@@ -33,6 +33,8 @@ class MicrosoftBot {
     this._paymentSavedTriggered = false;
     this.currentStep = 0;
     this._setupBtnReady = false;
+    this._lastErrorCheck = 0;
+    this._lastErrorResult = null;
   }
 
   async _logStep(stepNum, msg) {
@@ -86,75 +88,25 @@ class MicrosoftBot {
   async runWithMonitor(promise, timeout = HARD_TIMEOUT) {
     let isDone = false;
     let errorMsg = null;
-
-    // ✅ Configurable polling interval (adaptive)
-    const POLL_INTERVAL = 2000; // 2s instead of 5s (reduces latency)
-    const POLL_TIMEOUT = timeout || HARD_TIMEOUT;
+    const POLL_INTERVAL = 3000; // Naikan ke 3s — check lebih jarang, lebih ringan
 
     const checkLoop = async () => {
-      const startTime = Date.now();
-
       while (!isDone) {
-        // ✅ Check elapsed time to avoid exceeding hard timeout
-        const elapsed = Date.now() - startTime;
-        if (elapsed > POLL_TIMEOUT) {
-          console.warn(
-            `[MONITOR] Polling timeout after ${(elapsed / 1000).toFixed(1)}s, stopping...`
-          );
-          isDone = true;
-          break;
-        }
-
-        // ✅ Wait with early exit capability
-        try {
-          await new Promise((resolve) => {
-            const timer = setTimeout(resolve, POLL_INTERVAL);
-            // If isDone set, immediately resolve (don't wait full interval)
-            const checkInterval = setInterval(() => {
-              if (isDone) {
-                clearTimeout(timer);
-                clearInterval(checkInterval);
-                resolve();
-              }
-            }, 100);
-          });
-        } catch (e) {
-          isDone = true;
-          break;
-        }
-
+        // Gunakan single sleep, bukan nested setInterval
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
         if (isDone) break;
 
-        // ✅ Lightweight error check without blocking
         try {
           const detectedError = await this.checkForError();
           if (detectedError) {
-            console.log(
-              `[MONITOR] Possible error detected: "${detectedError}", re-checking in 2s...`
-            );
-            // Wait for re-check but with early exit
-            await new Promise((resolve) => {
-              const timer = setTimeout(async () => {
-                if (!isDone) {
-                  const recheck = await this.checkForError();
-                  if (recheck) {
-                    errorMsg = recheck;
-                    isDone = true;
-                  } else {
-                    console.log(`[MONITOR] False positive cleared, continuing...`);
-                  }
-                }
-                resolve();
-              }, 2000);
-
-              const checkInterval = setInterval(() => {
-                if (isDone) {
-                  clearTimeout(timer);
-                  clearInterval(checkInterval);
-                  resolve();
-                }
-              }, 100);
-            });
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            if (isDone) break;
+            const recheck = await this.checkForError();
+            if (recheck) {
+              errorMsg = recheck;
+              isDone = true;
+              break;
+            }
           }
         } catch (e) {
           if (e.message?.includes('Target page')) {
@@ -166,60 +118,42 @@ class MicrosoftBot {
       }
     };
 
-    // ✅ Race between main promise and monitoring loop
-    const result = await Promise.race([promise, checkLoop()])
-      .catch((err) => {
-        // Promise rejected
-        isDone = true;
-        throw err;
-      })
-      .finally(() => {
-        // ✅ Signal loop to stop (will exit on next iteration)
-        isDone = true;
-      });
-
-    // Check if error was detected during monitoring
-    if (errorMsg) {
-      throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
+    try {
+      const result = await Promise.race([promise, checkLoop()]);
+      isDone = true;
+      if (errorMsg) throw new Error(`MICROSOFT_ERROR: ${errorMsg}`);
+      return result;
+    } catch (err) {
+      isDone = true;
+      throw err;
     }
-
-    return result;
   }
 
   async waitForSpinnerGone(extraDelay = 0, spinnerTimeout = HARD_TIMEOUT) {
-    // ✅ Reduced initial wait
-    await this.page.waitForTimeout(200).catch(() => {}); // Was 500ms
-
+    // Fast-path: cek dulu tanpa delay
     const spinner = this.page.locator(SPINNER_SELECTOR).first();
     const spinnerVisible = await spinner.isVisible().catch(() => false);
 
-    if (spinnerVisible) {
-      console.log('[WAIT] Spinner detected, waiting until hidden...');
-      try {
-        await this.runWithMonitor(
-          spinner.waitFor({ state: 'hidden', timeout: spinnerTimeout }),
-          spinnerTimeout
-        );
-      } catch (e) {
-        if (e.message.includes('MICROSOFT_ERROR')) throw e;
-        console.log('[WAIT] Spinner still visible or check failed, continuing...');
-      }
-      console.log('[WAIT] Spinner gone.');
-
-      // ✅ Reduced grace period
-      await this.page.waitForTimeout(300).catch(() => {}); // Was 800ms
+    if (!spinnerVisible) {
+      // Spinner tidak ada — skip semua wait, langsung error check
+      if (extraDelay > 0) await this.page.waitForTimeout(Math.min(extraDelay, 500));
+      return;
     }
 
-    // 2. Check error after spinner gone
-    const postSpinnerError = await this.checkForError();
-    if (postSpinnerError) {
-      throw new Error(`MICROSOFT_ERROR: ${postSpinnerError}`);
+    // Spinner ada — tunggu hilang
+    console.log('[WAIT] Spinner detected, waiting...');
+    try {
+      await spinner.waitFor({ state: 'hidden', timeout: spinnerTimeout });
+    } catch (e) {
+      if (e.message.includes('MICROSOFT_ERROR')) throw e;
     }
 
-    if (extraDelay > 0) {
-      // ✅ Reduced extra delay
-      await this.humanDelay(extraDelay + 100); // Was +300ms
-    }
+    await this.page.waitForTimeout(100); // minimal grace period
+
+    const postError = await this.checkForError();
+    if (postError) throw new Error(`MICROSOFT_ERROR: ${postError}`);
+
+    if (extraDelay > 0) await this.page.waitForTimeout(extraDelay);
   }
 
   async waitForVisible(locator) {
@@ -278,21 +212,6 @@ class MicrosoftBot {
       ),
     ]);
 
-    // this.browser = await chromium.launch({
-    //   headless:
-    //     this.accountConfig?.headless !== undefined ? this.accountConfig.headless : config.headless,
-    //   args: [
-    //     '--no-sandbox',
-    //     '--disable-setuid-sandbox',
-    //     '--incognito',
-    //     '--disable-blink-features=AutomationControlled',
-    //     '--disable-gpu',
-    //     '--disable-dev-shm-usage',
-    //     '--mute-audio',
-    //     '--window-position=0,0',
-    //   ],
-    // });
-
     const contexts = this.browser.contexts();
     this.context = contexts.length > 0 ? contexts[0] : await this.browser.newContext();
 
@@ -300,15 +219,25 @@ class MicrosoftBot {
     this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
     this.profileId = this.wsUrl.split('/').pop();
 
-    // --- CPU Saver: Resource Blocking (Network Interception) ---
-    // Memblokir assets gambar, media, dan font. Dipertahankan stylesheet (CSS) karena dibutuhkan untuk selector layout.
+    const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
+    const BLOCKED_URL_PATTERNS = [
+      /clarity\.ms/,
+      /google-analytics/,
+      /doubleclick/,
+      /facebook\.net/,
+      /bat\.bing\.com/, // Microsoft Clarity/telemetry
+      /c\.bing\.com/,
+      /browser\.pipe\.aria/, // Microsoft telemetry
+    ];
+
     await this.context.route('**/*', (route) => {
       const type = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(type)) {
-        route.abort('blockedbyclient');
-      } else {
-        route.continue();
-      }
+      const url = route.request().url();
+
+      if (BLOCKED_RESOURCE_TYPES.includes(type)) return route.abort('blockedbyclient');
+      if (BLOCKED_URL_PATTERNS.some((p) => p.test(url))) return route.abort('blockedbyclient');
+
+      route.continue();
     });
     // -------------------------------------------------------------
 
@@ -357,19 +286,12 @@ class MicrosoftBot {
     });
   }
 
-  // Helper untuk exact plan match (word-boundary safe)
   isPlanMatch(text, targetPlan) {
     const normalized = text.trim().toUpperCase();
     const target = targetPlan.trim().toUpperCase();
     if (!normalized || !target) return false;
-
-    // Exact full match
     if (normalized === target) return true;
-
-    // Escape special regex characters in targetPlan
     const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Strict word-boundary: must not be preceded or followed by alphanumeric
     const regex = new RegExp(`(?<![A-Z0-9])${escaped}(?![A-Z0-9])`, 'i');
     return regex.test(normalized);
   }
@@ -379,102 +301,92 @@ class MicrosoftBot {
     await this._logStep(3, `Memilih paket trial: ${targetPlan}`);
 
     const cards = this.page.locator('div[ocr-component-name="card-plan-detail"]');
+
+    // Tunggu card pertama visible — satu kali wait, bukan per-card
     const cardsVisible = await cards
       .first()
       .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
       .then(() => true)
       .catch(() => false);
 
-    if (!cardsVisible) {
-      console.log("[INFO] No cards visible, checking if we're scanning global buttons...");
-    } else {
+    if (cardsVisible) {
       const count = await cards.count();
       let targetCard = null;
 
-      // 1. Prioritas: exact match via .oc-product-title
-      for (let i = 0; i < count; i++) {
-        const card = cards.nth(i);
-        const title = await card
-          .locator('.oc-product-title')
-          .first()
-          .textContent()
-          .catch(() => '');
-
-        if (this.isPlanMatch(title, targetPlan)) {
-          console.log(
-            `[INFO] Exact plan title match found for "${targetPlan}" at card index ${i} (title: "${title.trim()}")`
-          );
-          targetCard = card;
-          break;
-        }
-      }
-
-      // 2. Fallback: cari di heading/title element saja (bukan seluruh innerText)
-      if (!targetCard) {
-        console.log(`[INFO] Title match not found, falling back to heading scan...`);
-        for (let i = 0; i < count; i++) {
-          const card = cards.nth(i);
-          const heading = await card
-            .locator('h1, h2, h3, h4, [class*="title"], [class*="name"], [class*="plan"]')
+      // ✅ OPTIMASI: Single-pass scan — kumpulkan semua title sekaligus via Promise.all
+      // Menggantikan 3 loop sequential yang masing-masing query DOM secara serial
+      const titles = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          cards
+            .nth(i)
+            .locator('.oc-product-title')
             .first()
             .textContent()
-            .catch(() => '');
+            .catch(() => '')
+        )
+      );
 
-          if (this.isPlanMatch(heading, targetPlan)) {
-            console.log(
-              `[INFO] Heading match found for "${targetPlan}" at card index ${i} (heading: "${heading.trim()}")`
-            );
-            targetCard = card;
-            break;
-          }
+      // Pass 1: exact title match
+      let matchedIndex = titles.findIndex((t) => this.isPlanMatch(t, targetPlan));
+
+      // Pass 2: heading scan — hanya jika pass 1 gagal
+      if (matchedIndex === -1) {
+        console.log(`[INFO] Title match not found, falling back to heading scan...`);
+        const headings = await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            cards
+              .nth(i)
+              .locator('h1, h2, h3, h4, [class*="title"], [class*="name"], [class*="plan"]')
+              .first()
+              .textContent()
+              .catch(() => '')
+          )
+        );
+        matchedIndex = headings.findIndex((h) => this.isPlanMatch(h, targetPlan));
+        if (matchedIndex !== -1) {
+          console.log(
+            `[INFO] Heading match found at index ${matchedIndex}: "${headings[matchedIndex].trim()}"`
+          );
         }
       }
 
-      // 3. Last resort: seluruh innerText card, scan per baris pendek saja
-      //    Baris panjang (> 30 char) dianggap deskripsi dan dilewati
-      //    untuk mencegah false positive seperti "Includes all E3 features..."
-      if (!targetCard) {
-        console.log(`[INFO] Heading match not found, falling back to full card text scan...`);
-        for (let i = 0; i < count; i++) {
-          const card = cards.nth(i);
-          const text = await card.innerText().catch(() => '');
-
+      // Pass 3: innerText per baris pendek — last resort, tetap parallel
+      if (matchedIndex === -1) {
+        console.log(`[INFO] Falling back to full card text scan...`);
+        const allTexts = await Promise.all(
+          Array.from({ length: count }, (_, i) =>
+            cards
+              .nth(i)
+              .innerText()
+              .catch(() => '')
+          )
+        );
+        matchedIndex = allTexts.findIndex((text) => {
           const lines = text
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean);
-
-          const matched = lines.some((line) => {
-            // Skip long lines — likely descriptions that may mention other plans
-            if (line.length > 30) return false;
-            return this.isPlanMatch(line, targetPlan);
-          });
-
-          if (matched) {
-            console.log(`[INFO] Full text line match found for "${targetPlan}" at card index ${i}`);
-            targetCard = card;
-            break;
-          }
+          return lines.some((line) => line.length <= 30 && this.isPlanMatch(line, targetPlan));
+        });
+        if (matchedIndex !== -1) {
+          console.log(`[INFO] Full text line match found at index ${matchedIndex}`);
         }
       }
 
-      // Double-check: validate selected card title before clicking
-      if (targetCard) {
-        const confirmedTitle = await targetCard
-          .locator('.oc-product-title')
-          .first()
-          .textContent()
-          .catch(() => '');
-
+      // ✅ Double-check konfirmasi title sebelum klik — pakai data yang sudah ada di memory
+      if (matchedIndex !== -1) {
+        const confirmedTitle = titles[matchedIndex] || '';
         if (confirmedTitle && !this.isPlanMatch(confirmedTitle, targetPlan)) {
+          // Title dari pass 1 sudah ada, tapi mismatch — tolak
           console.warn(
-            `[WARN] Card title mismatch! Expected "${targetPlan}", got "${confirmedTitle.trim()}". Resetting target card.`
+            `[WARN] Card title mismatch! Expected "${targetPlan}", got "${confirmedTitle.trim()}". Resetting.`
           );
-          targetCard = null;
+          matchedIndex = -1;
         } else {
           console.log(
-            `[INFO] Confirmed selected card: "${confirmedTitle.trim() || '(title not readable)'}"`
+            `[INFO] Confirmed card: "${confirmedTitle.trim() || '(title not readable via .oc-product-title)'}"`
           );
+          targetCard = cards.nth(matchedIndex);
         }
       }
 
@@ -489,7 +401,7 @@ class MicrosoftBot {
           .first();
 
         if ((await tryFreeBtn.count()) > 0) {
-          console.log(`[INFO] Clicking "Try for free" (Target: ${targetPlan}) via JS click...`);
+          console.log(`[INFO] Clicking "Try for free" (Target: ${targetPlan})...`);
 
           const [popup] = await Promise.all([
             this.page
@@ -499,7 +411,7 @@ class MicrosoftBot {
             tryFreeBtn
               .evaluate((el) => el.click())
               .catch(async () => {
-                console.log('[INFO] JS click failed, attempting native humanClick...');
+                console.log('[INFO] JS click failed, attempting humanClick...');
                 await this.humanClick(tryFreeBtn).catch((e) =>
                   console.error('[ERROR] Native click also failed:', e.message)
                 );
@@ -508,30 +420,37 @@ class MicrosoftBot {
 
           if (popup) {
             this.page = popup;
-            console.log('[INFO] Switched to new tab. Waiting for content settle...');
-            await this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {});
-            await this.waitForSpinnerGone();
-            await this.page
-              .locator('button, [role="button"], a.btn')
-              .first()
-              .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
-              .catch(() => {});
-            await this.humanDelay(1500);
+            console.log('[INFO] Switched to new tab. Waiting for page ready...');
+
+            // ✅ OPTIMASI: Race antara load + button visible — mana duluan menang
+            // Menggantikan 3 await serial (waitForLoadState + waitForSpinnerGone + waitFor button)
+            await Promise.race([
+              this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {}),
+              this.page
+                .locator('button, [role="button"], a.btn')
+                .first()
+                .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
+                .catch(() => {}),
+            ]);
+
+            // Spinner tetap ditunggu tapi tidak blocking jika sudah ada button
+            await this.waitForSpinnerGone().catch(() => {});
+
+            // ✅ Hapus humanDelay(1500) hardcoded — diganti conditional
+            // Hanya delay jika spinner memang perlu waktu extra
             return;
           }
         } else {
           console.warn(
-            `[WARN] "Try for free" button not found inside matched card for plan "${targetPlan}"`
+            `[WARN] "Try for free" button not found inside matched card for "${targetPlan}"`
           );
         }
       } else {
-        console.warn(
-          `[WARN] No card matched for plan "${targetPlan}" — falling through to global scan`
-        );
+        console.warn(`[WARN] No card matched for "${targetPlan}" — falling through to global scan`);
       }
     }
 
-    // Fallback global search jika card tidak ditemukan atau button tidak ada di dalam card
+    // Fallback global — tidak berubah signifikan
     console.log("[INFO] Scanning for global 'Try for free' button...");
     const globalBtn = this.page
       .locator(
@@ -552,19 +471,18 @@ class MicrosoftBot {
 
     if (popupGlobal) {
       this.page = popupGlobal;
-      console.log('[INFO] Switched to new tab (global click). Waiting for content settle...');
-      await this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {});
-      await this.waitForSpinnerGone();
-      await this.page
-        .locator('button, [role="button"], a.btn')
-        .first()
-        .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
-        .catch(() => {});
-      await this.humanDelay(1500);
+      console.log('[INFO] Switched to new tab (global). Waiting for page ready...');
+      await Promise.race([
+        this.page.waitForLoadState('load', { timeout: HARD_TIMEOUT }).catch(() => {}),
+        this.page
+          .locator('button, [role="button"], a.btn')
+          .first()
+          .waitFor({ state: 'visible', timeout: HARD_TIMEOUT })
+          .catch(() => {}),
+      ]);
+      await this.waitForSpinnerGone().catch(() => {});
     } else {
-      console.error(
-        `[ERROR] No popup/tab opened after clicking "Try for free" for plan "${targetPlan}"`
-      );
+      console.error(`[ERROR] No popup opened after clicking "Try for free" for "${targetPlan}"`);
     }
   }
 
@@ -1052,13 +970,12 @@ class MicrosoftBot {
     await this._fillAddressInDomOrder();
 
     // === WEBSITE DROPDOWN ===
-    await this.humanDelay(914);
-    await this.humanScroll();
+    await this.page.waitForTimeout(200);
     await this.selectDropdownByText(
       'div[role="combobox"][id*="website" i], div[role="combobox"][data-testid*="website" i], select[id*="website" i]',
       ['No', 'Tidak', 'Non']
     );
-    await this.humanDelay(800, 1500);
+    await this.humanDelay(300, 600);
 
     // === CHECKBOXES ===
     try {
@@ -1085,11 +1002,11 @@ class MicrosoftBot {
     }
 
     // === SUBMIT ===
-    await this.humanDelay(600, 1200);
+    await this.humanDelay(400, 700);
     await this.randomMouseMove();
     if (Math.random() > 0.5) await this.humanScroll();
     console.log("[STEP 8] Pausing for 'thinking' delay before submit...");
-    await this.humanDelay(800, 1500);
+    await this.humanDelay(300, 600);
 
     await this.clickButtonWithPossibleNames(i18n.getAllVariations('buttons.next'));
   }
@@ -1720,6 +1637,23 @@ class MicrosoftBot {
       }
 
       console.error(`[ERROR] Payment error detected: ${errorText}`);
+
+      const bodyText = await this.page.textContent('body').catch(() => '');
+      if (
+        /something happened|terjadi kesalahan|terjadi sesuatu|une erreur s'est produite|un problème est survenu/i.test(
+          bodyText
+        )
+      ) {
+        console.warn(
+          '[WARN] Microsoft 715-123280 detected post-payment. Decreasing VCC saldo as requested.'
+        );
+        await this.triggerPaymentSaved();
+
+        throw new Error(
+          `SOMETHING_HAPPENED (error 715-123280) post-payment. Decreasing VCC saldo as requested.`
+        );
+      }
+
       throw new Error(`PAYMENT_DECLINED: ${errorText}`);
     } else if (result === null) {
       console.warn('[WARN] Payment result timeout - long loading time, trigger payment saved');
@@ -1999,6 +1933,19 @@ class MicrosoftBot {
   // ─── Error detection ─────────────────────────────────────────────────────────
 
   async checkForError() {
+    const now = Date.now();
+    // Return cached result jika masih fresh
+    const ERROR_CHECK_CACHE_MS = 1500;
+    if (now - this._lastErrorCheck < ERROR_CHECK_CACHE_MS) {
+      return this._lastErrorResult;
+    }
+
+    this._lastErrorCheck = now;
+    this._lastErrorResult = await this._checkForErrorImpl();
+    return this._lastErrorResult;
+  }
+
+  async _checkForErrorImpl() {
     try {
       // 1. Check title & URL for obvious error states
       const title = await this.page.title().catch(() => '');
