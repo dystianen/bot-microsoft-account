@@ -117,38 +117,37 @@ async function processSingleAccount(accountConfig, index, total, onPaymentSaved)
     const elapsedMs = Date.now() - startTime;
     console.log(`[ACCOUNT] Total time: ${(elapsedMs / 1000).toFixed(1)}s`);
 
-    if (executionResult && executionResult.status !== 'SUCCESS') {
-      console.log(`[Account ${index + 1}] Waiting 5s before cleanup...`);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
-
-    console.log(`[Account ${index + 1}] Starting cleanup...`);
-
-    if (bot) {
-      try {
-        await bot.cleanup();
-      } catch (e) {
-        console.error(`[Account ${index + 1}] Bot cleanup error:`, e.message);
-      }
-    }
-
-    if (currentProfileId) {
-      try {
-        await adsPowerHelper.stopBrowser(currentProfileId);
-        console.log(`[Account ${index + 1}] Browser stopped.`);
-      } catch (e) {
-        console.warn(`[Account ${index + 1}] stopBrowser warning:`, e.message);
+    // ✅ Run cleanup in background so next task can start immediately
+    (async () => {
+      console.log(`[Account ${index + 1}] Starting background cleanup...`);
+      if (bot) {
+        try {
+          await bot.cleanup();
+        } catch (e) {
+          console.error(`[Account ${index + 1}] Bot cleanup error:`, e.message);
+        }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (currentProfileId) {
+        try {
+          await adsPowerHelper.stopBrowser(currentProfileId);
+          console.log(`[Account ${index + 1}] Browser stopped.`);
+        } catch (e) {
+          console.warn(`[Account ${index + 1}] stopBrowser warning:`, e.message);
+        }
 
-      try {
-        await adsPowerHelper.deleteProfile(currentProfileId);
-        console.log(`[Account ${index + 1}] AdsPower profile deleted.`);
-      } catch (e) {
-        console.error(`[Account ${index + 1}] deleteProfile error:`, e.message);
+        // Small grace period for browser to fully close before deletion
+        // (Runs in background, so doesn't block the next task)
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        try {
+          await adsPowerHelper.deleteProfile(currentProfileId);
+          console.log(`[Account ${index + 1}] AdsPower profile deleted.`);
+        } catch (e) {
+          console.error(`[Account ${index + 1}] deleteProfile error:`, e.message);
+        }
       }
-    }
+    })().catch(err => console.error(`[Account ${index + 1}] Background cleanup failed:`, err.message));
 
     if (!executionResult) {
       executionResult = {

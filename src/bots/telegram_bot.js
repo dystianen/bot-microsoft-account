@@ -484,6 +484,7 @@ function initializeBotHandlers(bot) {
     const runQueue = async () => {
       let activeWorkers = 0;
       let globalIdx = 0;
+      let slotJustFreed = false;
       const pendingPromises = new Set();
       const maxWorkers = userConf.concurrencyLimit;
       const originalTotal = session.accounts.length;
@@ -640,8 +641,10 @@ function initializeBotHandlers(bot) {
             activeWorkers < maxWorkers &&
             session.accounts.length > 0 &&
             !isShuttingDown &&
-            now - lastSpawnTime >= SPAWN_STAGGER
+            (now - lastSpawnTime >= SPAWN_STAGGER || slotJustFreed)
           ) {
+            // Reset flag if we are spawning because a slot was freed
+            slotJustFreed = false;
             // ── Assign VCC BEFORE spawning the worker ──────────────────────────
             const vcc = getNextVcc();
             if (!vcc) {
@@ -658,6 +661,7 @@ function initializeBotHandlers(bot) {
 
             const promise = processAccount(accountData, currentIdx, vcc).finally(() => {
               activeWorkers--;
+              slotJustFreed = true;
               pendingPromises.delete(promise);
             });
             pendingPromises.add(promise);
