@@ -701,7 +701,7 @@ class MicrosoftBot {
 
         // Selector untuk baris pesan (berdasarkan screenshot)
         const messageRow = mailporaryPage
-          .locator('text=/Vérifiez votre adresse e-mail|Microsoft/i')
+          .locator('text=/Vérifiez votre adresse e-mail|Verify your email address|Microsoft/i')
           .first();
 
         if (await messageRow.isVisible().catch(() => false)) {
@@ -711,7 +711,7 @@ class MicrosoftBot {
           // Tunggu konten muncul (Sesuai HTML: <h3 ...>944920</h3>)
           const codeLocator = mailporaryPage
             .locator('.emailBody h3, h3')
-            .filter({ hasText: /^\d{6}$/ })
+            .filter({ hasText: /^\d+$/ })
             .first();
 
           try {
