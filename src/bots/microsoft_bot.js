@@ -694,54 +694,107 @@ class MicrosoftBot {
       });
 
       let code = null;
-      const MAX_POLL_ATTEMPTS = 12; // ~1 menit total
+      const MAX_POLL_ATTEMPTS = 12;
+      let emailOpened = false;
 
       for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
         console.log(`[OTP] Checking inbox (Attempt ${i + 1}/${MAX_POLL_ATTEMPTS})...`);
 
-        // Selector untuk baris pesan (berdasarkan screenshot)
-        const messageRow = mailporaryPage
-          .locator('text=/Vérifiez votre adresse e-mail|Verify your email address|Microsoft/i')
-          .first();
-
-        if (await messageRow.isVisible().catch(() => false)) {
-          console.log('[OTP] Verification email detected, clicking...');
-          await messageRow.click();
-
-          // Tunggu konten muncul (Sesuai HTML: <h3 ...>944920</h3>)
-          const codeLocator = mailporaryPage
-            .locator('.emailBody h3, h3')
-            .filter({ hasText: /^\d+$/ })
+        // ── Kalau email belum dibuka, cari dan klik dulu ──
+        if (!emailOpened) {
+          const messageRow = mailporaryPage
+            .locator('text=/Vérifiez votre adresse e-mail|Verify your email address|Microsoft/i')
             .first();
 
-          try {
-            await codeLocator.waitFor({ state: 'visible', timeout: 10000 });
-            const extracted = await codeLocator.textContent();
-            if (extracted && extracted.trim().match(/^\d{6}$/)) {
-              code = extracted.trim();
-              console.log(`[OTP] Successfully extracted code: ${code}`);
-              break;
+          if (await messageRow.isVisible().catch(() => false)) {
+            console.log('[OTP] Verification email detected, clicking...');
+            await messageRow.click();
+            emailOpened = true;
+            await mailporaryPage.waitForTimeout(2000);
+          } else {
+            console.log('[OTP] Email not found yet, refreshing inbox...');
+            const refreshBtn = mailporaryPage
+              .locator(
+                'button:has-text("Actualiser"), button:has-text("Refresh"), button:has-text("Update")'
+              )
+              .first();
+
+            if (await refreshBtn.isVisible().catch(() => false)) {
+              await refreshBtn.click();
+            } else {
+              await mailporaryPage.reload({ waitUntil: 'domcontentloaded' });
             }
-          } catch (e) {
-            console.warn('[OTP] Code not found in body yet, refreshing page...');
-            await mailporaryPage.reload({ waitUntil: 'domcontentloaded' });
+
+            await mailporaryPage.waitForTimeout(5000);
             continue;
           }
         }
 
-        // Klik tombol Actualiser (Refresh)
-        const refreshBtn = mailporaryPage
-          .locator(
-            'button:has-text("Actualiser"), button:has-text("Refresh"), button:has-text("Update")'
-          )
-          .first();
-        if (await refreshBtn.isVisible()) {
-          await refreshBtn.click();
-        } else {
-          await mailporaryPage.reload({ waitUntil: 'domcontentloaded' });
+        // ── Helper: ekstrak kode dari sekumpulan locator ──
+        const extractCodeFromLocators = async (locator) => {
+          try {
+            const allEls = await locator.all();
+            for (const el of allEls) {
+              const text = (await el.textContent().catch(() => '')).trim();
+              if (/^\d{6,8}$/.test(text)) {
+                return text;
+              }
+            }
+          } catch (e) {
+            // silent
+          }
+          return null;
+        };
+
+        // ── Layer 1: Direct selector di halaman utama ──
+        let extracted = null;
+
+        extracted = await extractCodeFromLocators(mailporaryPage.locator('.emailBody h3, h3'));
+        if (extracted) console.log('[OTP] Code found via direct selector');
+
+        // ── Layer 2: Loop semua frame (non-main) ──
+        if (!extracted) {
+          try {
+            const frames = mailporaryPage.frames();
+            for (const frame of frames) {
+              if (frame === mailporaryPage.mainFrame()) continue;
+              extracted = await extractCodeFromLocators(frame.locator('.emailBody h3, h3'));
+              if (extracted) {
+                console.log('[OTP] Code found inside iframe (frames loop)');
+                break;
+              }
+            }
+          } catch (e) {
+            console.log('[OTP] frames() loop failed:', e.message);
+          }
         }
 
+        // ── Layer 3: frameLocator (iframe dinamis) ──
+        if (!extracted) {
+          try {
+            extracted = await extractCodeFromLocators(
+              mailporaryPage.frameLocator('iframe').locator('.emailBody h3, h3')
+            );
+            if (extracted) console.log('[OTP] Code found via frameLocator');
+          } catch (e) {
+            console.log('[OTP] frameLocator failed:', e.message);
+          }
+        }
+
+        // ── Validasi hasil ──
+        if (extracted) {
+          code = extracted;
+          console.log(`[OTP] Successfully extracted code: ${code}`);
+          break;
+        }
+
+        // Kode belum ketemu, tunggu lalu retry (JANGAN reload)
+        console.warn(`[OTP] Code not found yet (attempt ${i + 1}), retrying in 5s...`);
         await mailporaryPage.waitForTimeout(5000);
+      }
+
+      if (!code) {
+        console.error('[OTP] Failed to extract OTP after all attempts');
       }
 
       return code;
